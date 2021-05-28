@@ -14,6 +14,7 @@ executable gerritbot-matrix
     build-depends:    base < 5
                     , aeson
                     , exceptions
+                    , dhall
                     , foldl
                     , gerrit
                     , http-client            ^>= 0.7
