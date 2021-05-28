@@ -22,6 +22,8 @@ import qualified Matrix
 import Options.Generic
 import Relude
 
+-- | Command line interface
+-- See: http://hackage.haskell.org/package/optparse-generic-1.4.4/docs/Options-Generic.html
 data CLI w = CLI
   { gerritHost :: w ::: Text <?> "The gerrit host",
     gerritUser :: w ::: Text <?> "The gerrit username",
@@ -33,11 +35,15 @@ data CLI w = CLI
 instance ParseRecord (CLI Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
 
+-- | Generate Haskell Type from Dhall Type
+-- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
 Dhall.TH.makeHaskellTypes [Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"]
 
+-- | Match configuration glob with event value, only prefix glob is working at the moment
 match :: Text -> Text -> Bool
-match obj conf = conf `Text.isPrefixOf` obj
+match eventValue conf = conf `Text.isPrefixOf` eventValue
 
+-- | Create text message for an event
 formatMessage :: Gerrit.ChangeEvent -> Text
 formatMessage Gerrit.ChangeEvent {..} =
   author <> " proposed " <> project <> " " <> branch <> ": " <> url
@@ -52,6 +58,7 @@ formatMessage Gerrit.ChangeEvent {..} =
           "Anonymous User"
           (Gerrit.userName user <|> Gerrit.userUsername user <|> Gerrit.userEmail user)
 
+-- | Find if a channel match an event, return the roomId
 getEventRoom :: Gerrit.ChangeEvent -> Channel -> Maybe Text
 getEventRoom Gerrit.ChangeEvent {..} Channel {..}
   | projectMatch && branchMatch = Just roomId
@@ -60,6 +67,7 @@ getEventRoom Gerrit.ChangeEvent {..} Channel {..}
     projectMatch = any (match changeEventProject) projects
     branchMatch = any (match $ Gerrit.changeBranch changeEventChange) branches
 
+-- | The gerritbot callback
 onEvent :: [Channel] -> Matrix.Session -> Gerrit.Event -> IO ()
 onEvent channels sess event = case event of
   Gerrit.EventChange changeEvent@Gerrit.ChangeEvent {..} -> do
@@ -76,6 +84,7 @@ onEvent channels sess event = case event of
       res <- Matrix.sendMessage sess (Matrix.RoomID roomId) (formatMessage changeEvent)
       print res
 
+-- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
   args <- unwrapRecord "Gerritbot Matrix"

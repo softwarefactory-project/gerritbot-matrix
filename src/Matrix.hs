@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
--- |
+-- | A bare minimal matrix client
 module Matrix where
 
 import Control.Monad (mzero)

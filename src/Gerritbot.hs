@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
+-- | A gerrit stream client
 module Gerritbot (GerritServer (..), runStreamClient) where
 
 import qualified Control.Foldl as Fold
@@ -16,22 +17,23 @@ import qualified Turtle
 err :: Text -> IO ()
 err = hPutStrLn stderr . mappend "[E] "
 
-log :: Text -> IO ()
-log = putTextLn . mappend "[+] "
-
 data GerritServer = GerritServer
   { host :: Text,
     username :: Text
   }
 
+-- | 'runStreamClient' connects to a GerritServer with ssh and run the callback for each events.
 runStreamClient :: GerritServer -> (Event -> IO ()) -> IO ()
 runStreamClient gerritServer cb = loop
   where
+    -- Recover from exception and reconnect after 1 second
     loop = Retry.recovering (Retry.constantDelay 1000000) [\_ -> Handler handler] (const run)
+    -- Handle client exit
     handler :: Turtle.ExitCode -> IO Bool
     handler code = do
       err $ "stream " <> show code
       pure True
+    -- Decode the event and skip ref-replicated
     onEvent evTxt = do
       case Aeson.decode $ encodeUtf8 evTxt of
         Just v -> cb v
