@@ -46,8 +46,11 @@ match eventValue conf = conf `Text.isPrefixOf` eventValue
 -- | Create text message for an event
 formatMessage :: Gerrit.ChangeEvent -> Text
 formatMessage Gerrit.ChangeEvent {..} =
-  author <> " proposed " <> project <> " " <> branch <> ": " <> url
+  case changeEventType of
+    Gerrit.PatchsetCreated -> author <> " proposed " <> info
+    Gerrit.ChangeMerged -> "Merged " <> info
   where
+    info = project <> " " <> branch <> ": " <> url
     url = Gerrit.changeUrl changeEventChange
     branch = Gerrit.changeBranch changeEventChange
     project = changeEventProject
