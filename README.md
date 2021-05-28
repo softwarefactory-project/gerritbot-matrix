@@ -1,6 +1,6 @@
 # gerritbot-matrix
 
-A matrix version of the [gerritbot][gerribot].
+A matrix version of the [gerritbot][gerritbot].
 
 ## Usage
 
