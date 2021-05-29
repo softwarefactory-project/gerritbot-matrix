@@ -23,9 +23,10 @@ spec = describe "unit tests" $ do
     let roomId = "testRoom"
         projects = ["software-factory/*"]
         branches = ["main"]
+        events = [PatchsetCreated]
         channel = Channel {..}
         change = fakeChange "software-factory/gerritbot-haskell" "main"
-     in getEventRoom change channel `shouldBe` Just (RoomID "testRoom")
+     in getEventRoom Gerrit.PatchsetCreatedEvent change channel `shouldBe` Just (RoomID "testRoom")
   it "group event" $ do
     let events =
           [ -- Sequencial events

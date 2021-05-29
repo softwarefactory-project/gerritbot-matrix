@@ -8,6 +8,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -44,7 +45,19 @@ instance ParseRecord (CLI Wrapped) where
 
 -- | Generate Haskell Type from Dhall Type
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
-Dhall.TH.makeHaskellTypes [Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"]
+Dhall.TH.makeHaskellTypes
+  [ Dhall.TH.MultipleConstructors "EventType" "./src/EventType.dhall",
+    Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"
+  ]
+
+deriving instance Eq EventType
+
+-- | Compare gerritbot event type config with original gerrit type
+eventEquals :: Gerrit.EventType -> EventType -> Bool
+eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
+  (Gerrit.PatchsetCreatedEvent, PatchsetCreated) -> True
+  (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
+  _ -> False
 
 newtype EventAction = EventAction Text
   deriving (Show, Eq)
@@ -87,14 +100,15 @@ formatMessages (EventAction action) objects = action <> objectsTxt
       xs -> mconcat (mappend "\n- " . unObject <$> xs)
 
 -- | Find if a channel match a change, return the roomId
-getEventRoom :: Gerrit.Change -> Channel -> Maybe Matrix.RoomID
-getEventRoom Gerrit.Change {..} Channel {..}
-  | projectMatch && branchMatch = Just (Matrix.RoomID roomId)
+getEventRoom :: Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
+getEventRoom eventType Gerrit.Change {..} Channel {..}
+  | projectMatch && branchMatch && eventMatch = Just (Matrix.RoomID roomId)
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
     projectMatch = any (match changeProject) projects
     branchMatch = any (match changeBranch) branches
+    eventMatch = any (eventEquals eventType) events
 
 -- | The gerritbot callback
 onEvent :: [Channel] -> TBMQueue MatrixEvent -> Gerrit.Event -> IO ()
@@ -102,7 +116,7 @@ onEvent channels tqueue event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
       putTextLn $ "Processing " <> show event
-      case mapMaybe (getEventRoom change) channels of
+      case mapMaybe (getEventRoom (Gerrit.getEventType event) change) channels of
         [] -> putTextLn "No channel matched"
         xs -> do
           putTextLn $ "Queuing notification to " <> show xs
