@@ -11,7 +11,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- | The gerritbot-matrix main entrypoint
-module Main where
+module Gerritbot.Main where
 
 import qualified Data.Text as Text
 import Dhall
