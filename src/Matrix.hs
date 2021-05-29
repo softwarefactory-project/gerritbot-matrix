@@ -74,4 +74,4 @@ sendMessage session (RoomID roomId) body = do
     )
   where
     ctx = pack . showDigest . sha1 . toLazy . encodeUtf8 $ body
-    putData = MessageEvent "m.text" body
+    putData = MessageEvent "m.notice" body
