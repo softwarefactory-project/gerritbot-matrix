@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -18,7 +19,6 @@ import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.STM.TBMQueue (TBMQueue, newTBMQueueIO, writeTBMQueue)
 import qualified Data.HashMap.Strict as HM
-import qualified Data.Text as Text
 import Dhall hiding (maybe)
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
@@ -46,77 +46,81 @@ instance ParseRecord (CLI Wrapped) where
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
 Dhall.TH.makeHaskellTypes [Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"]
 
--- | Create 'MatrixEvent' for a 'Gerrit.ChangeEvent'
-toMatrixEvent :: Text -> Gerrit.ChangeEvent -> MatrixEvent
-toMatrixEvent meRoomId Gerrit.ChangeEvent {..} = MatrixEvent {..}
-  where
-    (meAuthor, meMessage) = case changeEventType of
-      Gerrit.PatchsetCreated -> (Just author, info)
-      Gerrit.ChangeMerged -> (Nothing, "Merged " <> info)
-    info = project <> " " <> branch <> ": " <> url
-    url = Gerrit.changeSubject changeEventChange <> "  " <> Gerrit.changeUrl changeEventChange
-    branch = Gerrit.changeBranch changeEventChange
-    project = changeEventProject
-    author = case changeEventUploader of
-      Nothing -> "Unknown User"
-      Just user ->
-        fromMaybe
-          "Anonymous User"
-          (Gerrit.userName user <|> Gerrit.userUsername user <|> Gerrit.userEmail user)
+newtype EventAction = EventAction Text
+  deriving (Show, Eq)
+  deriving newtype (Hashable)
 
-formatMessages :: Maybe Text -> [Text] -> Text
-formatMessages authorM messages =
-  case authorM of
-    Just author ->
-      author <> " proposed:" <> case messages of
-        [x] -> " " <> x
-        xs -> mconcat (mappend "\n- " <$> xs)
-    Nothing -> case messages of
-      [x] -> x
-      xs -> Text.intercalate "\n" (mappend "- " <$> xs)
+newtype EventObject = EventObject {unObject :: Text}
+  deriving (Show, Eq)
+  deriving newtype (Hashable)
 
 data MatrixEvent = MatrixEvent
-  { meAuthor :: Maybe Text,
-    meMessage :: Text,
-    meRoomId :: Text
+  { meAction :: EventAction,
+    meObject :: EventObject,
+    meRoomId :: Matrix.RoomID
   }
   deriving (Show, Eq)
 
--- | Find if a channel match an event, return the roomId
-getEventRoom :: Gerrit.ChangeEvent -> Channel -> Maybe Text
-getEventRoom Gerrit.ChangeEvent {..} Channel {..}
-  | projectMatch && branchMatch = Just roomId
+-- | Prepare a Matrix Event
+toMatrixEvent :: Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Matrix.RoomID -> MatrixEvent
+toMatrixEvent Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
+  where
+    meAction = EventAction $ author <> " " <> verb <> ":"
+    author =
+      fromMaybe
+        "Anonymous User"
+        (Gerrit.userName user <|> Gerrit.userUsername user <|> Gerrit.userEmail user)
+    verb = case event of
+      Gerrit.EventPatchsetCreated _ -> "proposed"
+      Gerrit.EventChangeMerged _ -> "merged"
+      Gerrit.EventChangeAbandoned _ -> "abandoned"
+      _ -> "n/a"
+    meObject = EventObject changeInfo
+    changeInfo =
+      changeProject <> " " <> changeBranch <> ": " <> changeSubject <> "  " <> changeUrl
+
+formatMessages :: EventAction -> [EventObject] -> Text
+formatMessages (EventAction action) objects = action <> objectsTxt
+  where
+    objectsTxt = case objects of
+      [x] -> " " <> unObject x
+      xs -> mconcat (mappend "\n- " . unObject <$> xs)
+
+-- | Find if a channel match a change, return the roomId
+getEventRoom :: Gerrit.Change -> Channel -> Maybe Matrix.RoomID
+getEventRoom Gerrit.Change {..} Channel {..}
+  | projectMatch && branchMatch = Just (Matrix.RoomID roomId)
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
-    projectMatch = any (match changeEventProject) projects
-    branchMatch = any (match $ Gerrit.changeBranch changeEventChange) branches
+    projectMatch = any (match changeProject) projects
+    branchMatch = any (match changeBranch) branches
 
 -- | The gerritbot callback
 onEvent :: [Channel] -> TBMQueue MatrixEvent -> Gerrit.Event -> IO ()
-onEvent channels tqueue event = case event of
-  Gerrit.EventChange changeEvent -> do
-    putTextLn $ "Processing " <> show event
-    case mapMaybe (getEventRoom changeEvent) channels of
-      [] -> putTextLn "No channel matched"
-      xs -> do
-        putTextLn $ "Sending notification to " <> show xs
-        mapM_ (queueMessage changeEvent) xs
-  _ -> pure mempty
+onEvent channels tqueue event =
+  case (Gerrit.getChange event, Gerrit.getUser event) of
+    (Just change, Just user) -> do
+      putTextLn $ "Processing " <> show event
+      case mapMaybe (getEventRoom change) channels of
+        [] -> putTextLn "No channel matched"
+        xs -> do
+          putTextLn $ "Queuing notification to " <> show xs
+          mapM_ (queueMessage $ toMatrixEvent change user event) xs
+    _ -> pure mempty
   where
-    queueMessage :: Gerrit.ChangeEvent -> Text -> IO ()
-    queueMessage changeEvent roomId =
-      atomically $ writeTBMQueue tqueue (toMatrixEvent roomId changeEvent)
+    queueMessage mkMatrixEvent roomId = do
+      atomically $ writeTBMQueue tqueue (mkMatrixEvent roomId)
 
 -- | Group events by room id and author
 -- See: https://hackage.haskell.org/package/relude-1.0.0.1/docs/Relude-Extra-Group.html#v:groupBy
-groupEvents :: [MatrixEvent] -> [(Matrix.RoomID, Maybe Text, [Text])]
+groupEvents :: [MatrixEvent] -> [(Matrix.RoomID, EventAction, [EventObject])]
 groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents events
   where
-    toGroup :: NonEmpty MatrixEvent -> (Matrix.RoomID, Maybe Text, [Text])
-    toGroup (x :| xs) = (Matrix.RoomID (meRoomId x), meAuthor x, fmap meMessage (x : xs))
+    toGroup :: NonEmpty MatrixEvent -> (Matrix.RoomID, EventAction, [EventObject])
+    toGroup (x :| xs) = (meRoomId x, meAction x, fmap meObject (x : xs))
     groupUserEvent :: [MatrixEvent] -> [NonEmpty MatrixEvent]
-    groupUserEvent = HM.elems . groupBy meAuthor
+    groupUserEvent = HM.elems . groupBy meAction
     groupRoomEvents :: [MatrixEvent] -> [[MatrixEvent]]
     groupRoomEvents = fmap toList . HM.elems . groupBy meRoomId
 
@@ -124,10 +128,10 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
 sendEvents :: Matrix.Session -> [MatrixEvent] -> IO ()
 sendEvents sess events = mapM_ send (groupEvents events)
   where
-    send :: (Matrix.RoomID, Maybe Text, [Text]) -> IO ()
-    send (roomID, authorM, messages) = do
+    send :: (Matrix.RoomID, EventAction, [EventObject]) -> IO ()
+    send (roomID, author, messages) = do
       logMsg $ "Sending events " <> show events
-      res <- Matrix.sendMessage sess roomID (formatMessages authorM messages)
+      res <- Matrix.sendMessage sess roomID (formatMessages author messages)
       print res
 
 -- | gerritbot-matrix entrypoint

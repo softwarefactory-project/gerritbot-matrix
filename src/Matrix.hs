@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -11,7 +13,7 @@ import Data.Text (Text, pack, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Relude (toLazy)
+import Relude (Hashable, toLazy)
 
 data Session = Session
   { baseUrl :: Text,
@@ -45,7 +47,9 @@ checkAccount session = do
   request <- mkRequest session "/_matrix/client/r0/account/whoami"
   doRequest session request
 
-newtype RoomID = RoomID Text deriving (Show, Eq)
+newtype RoomID = RoomID Text
+  deriving (Show, Eq)
+  deriving newtype (Hashable)
 
 newtype EventID = EventID Text deriving (Show)
 
