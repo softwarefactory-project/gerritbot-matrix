@@ -1,5 +1,15 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+
 -- | Utility function
 module Gerritbot.Utils where
+
+import Control.Concurrent (myThreadId, threadDelay)
+import Control.Concurrent.STM.TBMQueue (TBMQueue)
+import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
+import Data.Time.Clock (getCurrentTime)
+import Relude
+import Say
 
 -- | Globing
 -- >>> glob "" ""
@@ -24,3 +34,23 @@ glob ('?' : ps) (_ : xs) = glob ps xs
 glob (p : ps) (x : xs) = p == x && glob ps xs
 glob [] [] = True
 glob _ _ = False
+
+logMsg :: Text -> IO ()
+logMsg msg = do
+  now <- getCurrentTime
+  th <- myThreadId
+  say $ show now <> " [" <> show th <> "]: " <> msg
+
+-- | Helper function to group queue event based on a time limit
+bufferQueueRead :: Int -> TBMQueue a -> IO [a]
+bufferQueueRead maxTime tqueue = do
+  event <- fromMaybe (error "Queue is closed") <$> atomically (TBMQueue.readTBMQueue tqueue)
+  logMsg "Got one event, now buffering"
+  threadDelay maxTime
+  atomically $ drainQueue [event]
+  where
+    drainQueue acc = do
+      event <- fromMaybe (error "Queue is closed") <$> TBMQueue.tryReadTBMQueue tqueue
+      case event of
+        Nothing -> pure $ reverse acc
+        Just ev -> drainQueue (ev : acc)

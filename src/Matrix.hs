@@ -45,7 +45,7 @@ checkAccount session = do
   request <- mkRequest session "/_matrix/client/r0/account/whoami"
   doRequest session request
 
-newtype RoomID = RoomID Text deriving (Show)
+newtype RoomID = RoomID Text deriving (Show, Eq)
 
 newtype EventID = EventID Text deriving (Show)
 
