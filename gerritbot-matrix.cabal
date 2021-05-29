@@ -11,6 +11,7 @@ extra-source-files: src/**/*.dhall
 library
     exposed-modules:  Gerritbot
                     , Gerritbot.Main
+                    , Gerritbot.Utils
                     , Matrix
     build-depends:    base < 5
                     , SHA                    ^>= 1.6

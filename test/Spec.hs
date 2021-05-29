@@ -5,7 +5,8 @@
 module Main where
 
 import qualified Gerrit.Event as Gerrit
-import Gerritbot.Main (Channel (..), getEventRoom, match)
+import Gerritbot.Main (Channel (..), getEventRoom)
+import Gerritbot.Utils (glob)
 import Relude
 import Test.Hspec
 
@@ -15,11 +16,11 @@ main = hspec spec
 spec :: Spec
 spec = describe "unit tests" $ do
   it "match" $ do
-    match "software-factory/gerritbot-haskell" "software-factory/"
+    glob "software-factory/*" "software-factory/gerritbot-haskell"
       `shouldBe` True
   it "match config" $ do
     let roomId = "testRoom"
-        projects = ["software-factory/"]
+        projects = ["software-factory/*"]
         branches = ["main"]
         channel = Channel {..}
         event = fakeEvent "software-factory/gerritbot-haskell" "main"

@@ -13,11 +13,11 @@
 -- | The gerritbot-matrix main entrypoint
 module Gerritbot.Main where
 
-import qualified Data.Text as Text
 import Dhall
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
 import qualified Gerritbot
+import Gerritbot.Utils (glob)
 import qualified Matrix
 import Options.Generic
 import Relude
@@ -38,10 +38,6 @@ instance ParseRecord (CLI Wrapped) where
 -- | Generate Haskell Type from Dhall Type
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
 Dhall.TH.makeHaskellTypes [Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"]
-
--- | Match configuration glob with event value, only prefix glob is working at the moment
-match :: Text -> Text -> Bool
-match eventValue conf = conf `Text.isPrefixOf` eventValue
 
 -- | Create text message for an event
 formatMessage :: Gerrit.ChangeEvent -> Text
@@ -67,6 +63,7 @@ getEventRoom Gerrit.ChangeEvent {..} Channel {..}
   | projectMatch && branchMatch = Just roomId
   | otherwise = Nothing
   where
+    match eventValue confValue = glob (toString confValue) (toString eventValue)
     projectMatch = any (match changeEventProject) projects
     branchMatch = any (match $ Gerrit.changeBranch changeEventChange) branches
 
