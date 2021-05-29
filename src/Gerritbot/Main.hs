@@ -54,7 +54,7 @@ toMatrixEvent meRoomId Gerrit.ChangeEvent {..} = MatrixEvent {..}
       Gerrit.PatchsetCreated -> (Just author, info)
       Gerrit.ChangeMerged -> (Nothing, "Merged " <> info)
     info = project <> " " <> branch <> ": " <> url
-    url = Gerrit.changeUrl changeEventChange
+    url = Gerrit.changeSubject changeEventChange <> "  " <> Gerrit.changeUrl changeEventChange
     branch = Gerrit.changeBranch changeEventChange
     project = changeEventProject
     author = case changeEventUploader of
