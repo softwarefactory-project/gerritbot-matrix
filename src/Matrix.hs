@@ -87,3 +87,12 @@ sendMessage session (RoomID roomId) body bodyHTML = do
   where
     ctx = pack . showDigest . sha1 . toLazy . encodeUtf8 $ body
     putData = MessageEvent "m.notice" body "org.matrix.custom.html" bodyHTML
+
+instance FromJSON RoomID where
+  parseJSON (Object v) = RoomID <$> v .: "room_id"
+  parseJSON _ = mzero
+
+joinRoom :: Session -> RoomID -> IO RoomID
+joinRoom session (RoomID roomId) = do
+  request <- mkRequest session $ "/_matrix/client/r0/rooms/" <> roomId <> "/join"
+  doRequest session (request {HTTP.method = "POST"})

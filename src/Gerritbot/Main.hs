@@ -36,7 +36,8 @@ data CLI w = CLI
   { gerritHost :: w ::: Text <?> "The gerrit host",
     gerritUser :: w ::: Text <?> "The gerrit username",
     matrixUrl :: w ::: Text <?> "The matrix url",
-    configFile :: w ::: FilePath <?> "The gerritbot.dhall path"
+    configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
+    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)"
   }
   deriving stock (Generic)
 
@@ -155,6 +156,16 @@ sendEvents sess events = do
       res <- Matrix.sendMessage sess roomID text html
       print res
 
+-- | Sync the matrix client
+doSyncClient :: Matrix.Session -> [Channel] -> IO ()
+doSyncClient sess = mapM_ joinRoom
+  where
+    joinRoom :: Channel -> IO ()
+    joinRoom Channel {..} = do
+      logMsg $ "Joining room " <> show roomId
+      res <- Matrix.joinRoom sess (Matrix.RoomID roomId)
+      print res
+
 -- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
@@ -162,6 +173,7 @@ main = do
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
   sess <- Matrix.createSession (matrixUrl args) $! toText token
   channels <- Dhall.input auto (toText $ configFile args)
+  when (syncClient args) (doSyncClient sess channels)
   tqueue <- newTBMQueueIO 2048
   Async.concurrently_
     (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels)
