@@ -1,3 +1,6 @@
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
@@ -54,3 +57,34 @@ bufferQueueRead maxTime tqueue = do
       case event of
         Nothing -> pure $ reverse acc
         Just ev -> drainQueue (ev : acc)
+
+-- | Message formatting
+data Doc
+  = DocBody [Doc]
+  | DocText Text
+  | DocLink Text Text
+  | DocList [Doc]
+  deriving (Show, Eq, Generic, Hashable)
+
+instance IsString Doc where
+  fromString = DocText . toText
+
+renderText :: Doc -> Text
+renderText doc = case doc of
+  DocBody xs -> mconcat (fmap renderText xs)
+  DocText x -> x
+  DocLink url name -> name <> "  " <> url
+  DocList [x] -> " " <> renderText x
+  DocList xs -> mconcat $ fmap renderItem xs
+  where
+    renderItem x = "\n- " <> renderText x
+
+renderHtml :: Doc -> Text
+renderHtml doc = case doc of
+  DocBody xs -> mconcat (fmap renderHtml xs)
+  DocText x -> x
+  DocLink url name -> "<a href=\"" <> url <> "\">" <> name <> "</a>"
+  DocList [x] -> " " <> renderHtml x
+  DocList xs -> "\n<ul>" <> mconcat (fmap renderItem xs) <> "</ul>"
+  where
+    renderItem x = "<li>" <> renderHtml x <> "</li>"

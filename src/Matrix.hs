@@ -59,15 +59,23 @@ instance FromJSON EventID where
 
 data MessageEvent = MessageEvent
   { meMsgtype :: Text,
-    meBody :: Text
+    meBody :: Text,
+    meFormat :: Text,
+    meFormattedBody :: Text
   }
   deriving (Show)
 
 instance ToJSON MessageEvent where
-  toJSON msg = object ["msgtype" .= meMsgtype msg, "body" .= meBody msg]
+  toJSON msg =
+    object
+      [ "msgtype" .= meMsgtype msg,
+        "body" .= meBody msg,
+        "format" .= meFormat msg,
+        "formatted_body" .= meFormattedBody msg
+      ]
 
-sendMessage :: Session -> RoomID -> Text -> IO EventID
-sendMessage session (RoomID roomId) body = do
+sendMessage :: Session -> RoomID -> Text -> Text -> IO EventID
+sendMessage session (RoomID roomId) body bodyHTML = do
   request <- mkRequest session $ "/_matrix/client/r0/rooms/" <> roomId <> "/send/m.room.message/" <> ctx
   doRequest
     session
@@ -78,4 +86,4 @@ sendMessage session (RoomID roomId) body = do
     )
   where
     ctx = pack . showDigest . sha1 . toLazy . encodeUtf8 $ body
-    putData = MessageEvent "m.notice" body
+    putData = MessageEvent "m.notice" body "org.matrix.custom.html" bodyHTML

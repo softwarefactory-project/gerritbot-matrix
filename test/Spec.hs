@@ -6,7 +6,7 @@ module Main where
 
 import qualified Gerrit.Event as Gerrit
 import Gerritbot.Main hiding (main)
-import Gerritbot.Utils (glob)
+import Gerritbot.Utils
 import Matrix (RoomID (..))
 import Relude
 import Test.Hspec
@@ -48,9 +48,17 @@ spec = describe "unit tests" $ do
                        (room2, action2, [object1, object2])
                      ]
   it "format oneline" $ do
-    formatMessages action1 [object1] `shouldBe` "foo proposed: change1"
+    renderText (formatMessages action1 [object1])
+      `shouldBe` "foo proposed: change1 title  localhost"
   it "format multiline" $ do
-    formatMessages action1 [object1, object2] `shouldBe` "foo proposed:\n- change1\n- change2"
+    renderText (formatMessages action1 [object1, object2])
+      `shouldBe` "foo proposed:\n- change1 title  localhost\n- change2"
+  it "format html oneline" $ do
+    renderHtml (formatMessages action1 [object1])
+      `shouldBe` "foo proposed: change1 <a href=\"localhost\">title</a>"
+  it "format html multiline" $ do
+    renderHtml (formatMessages action1 [object1, object2])
+      `shouldBe` "foo proposed:\n<ul><li>change1 <a href=\"localhost\">title</a></li><li>change2</li></ul>"
   where
     (action1, action2, action3) =
       ( EventAction "foo proposed:",
@@ -58,7 +66,7 @@ spec = describe "unit tests" $ do
         EventAction "bar do:"
       )
     (object1, object2) =
-      (EventObject "change1", EventObject "change2")
+      (EventObject $ DocBody ["change1 ", DocLink "localhost" "title"], EventObject "change2")
     (room1, room2) =
       (RoomID "room1", RoomID "room2")
     fakeUser :: Gerrit.User

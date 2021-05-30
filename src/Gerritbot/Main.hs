@@ -24,7 +24,7 @@ import Dhall hiding (maybe)
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
 import qualified Gerritbot
-import Gerritbot.Utils (bufferQueueRead, glob, logMsg)
+import Gerritbot.Utils
 import qualified Matrix
 import Options.Generic
 import Relude
@@ -59,11 +59,11 @@ eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
   (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
   _ -> False
 
-newtype EventAction = EventAction Text
+newtype EventAction = EventAction Doc
   deriving (Show, Eq)
   deriving newtype (Hashable)
 
-newtype EventObject = EventObject {unObject :: Text}
+newtype EventObject = EventObject {unObject :: Doc}
   deriving (Show, Eq)
   deriving newtype (Hashable)
 
@@ -78,7 +78,7 @@ data MatrixEvent = MatrixEvent
 toMatrixEvent :: Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Matrix.RoomID -> MatrixEvent
 toMatrixEvent Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
   where
-    meAction = EventAction $ author <> " " <> verb <> ":"
+    meAction = EventAction . DocText $ author <> " " <> verb <> ":"
     author =
       fromMaybe
         "Anonymous User"
@@ -88,16 +88,15 @@ toMatrixEvent Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
       Gerrit.EventChangeMerged _ -> "merged"
       Gerrit.EventChangeAbandoned _ -> "abandoned"
       _ -> "n/a"
-    meObject = EventObject changeInfo
+    meObject = EventObject . DocBody $ changeInfo
     changeInfo =
-      changeProject <> " " <> changeBranch <> ": " <> changeSubject <> "  " <> changeUrl
+      [ DocText $ changeProject <> " " <> changeBranch <> ": ",
+        DocLink changeUrl changeSubject
+      ]
 
-formatMessages :: EventAction -> [EventObject] -> Text
-formatMessages (EventAction action) objects = action <> objectsTxt
-  where
-    objectsTxt = case objects of
-      [x] -> " " <> unObject x
-      xs -> mconcat (mappend "\n- " . unObject <$> xs)
+formatMessages :: EventAction -> [EventObject] -> Doc
+formatMessages (EventAction action) objects =
+  DocBody [action, DocList $ fmap unObject objects]
 
 -- | Find if a channel match a change, return the roomId
 getEventRoom :: Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
@@ -140,12 +139,16 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
 
 -- | The matrix client
 sendEvents :: Matrix.Session -> [MatrixEvent] -> IO ()
-sendEvents sess events = mapM_ send (groupEvents events)
+sendEvents sess events = do
+  logMsg $ "Sending events " <> show events
+  mapM_ send (groupEvents events)
   where
     send :: (Matrix.RoomID, EventAction, [EventObject]) -> IO ()
     send (roomID, author, messages) = do
-      logMsg $ "Sending events " <> show events
-      res <- Matrix.sendMessage sess roomID (formatMessages author messages)
+      let messageDoc = formatMessages author messages
+          text = renderText messageDoc
+          html = renderHtml messageDoc
+      res <- Matrix.sendMessage sess roomID text html
       print res
 
 -- | gerritbot-matrix entrypoint
