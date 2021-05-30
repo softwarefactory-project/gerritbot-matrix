@@ -6,4 +6,9 @@ in  [ Config::{
       , roomId = "!NienFdxyssCkyajoyU:matrix.org"
       , projects = [ "zuul/*", "software-factory/*" ]
       }
+    , Config::{
+      , roomId = "!RVsCBSBPpQxhCyVEcB:matrix.org"
+      , projects = [ "*" ]
+      , servers = [ "review.rdoproject.org" ]
+      }
     ]

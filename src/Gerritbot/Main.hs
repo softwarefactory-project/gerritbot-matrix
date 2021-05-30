@@ -23,6 +23,7 @@ import qualified Data.HashMap.Strict as HM
 import Dhall hiding (maybe)
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
+import Gerritbot (GerritServer (..))
 import qualified Gerritbot
 import Gerritbot.Utils
 import qualified Matrix
@@ -104,23 +105,24 @@ formatMessages (EventAction action) objects =
   DocBody [action, DocList $ fmap unObject objects]
 
 -- | Find if a channel match a change, return the roomId
-getEventRoom :: Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
-getEventRoom eventType Gerrit.Change {..} Channel {..}
-  | projectMatch && branchMatch && eventMatch = Just (Matrix.RoomID roomId)
+getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
+getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
+  | serverMatch && projectMatch && branchMatch && eventMatch = Just (Matrix.RoomID roomId)
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
+    serverMatch = any (match host) servers
     projectMatch = any (match changeProject) projects
     branchMatch = any (match changeBranch) branches
     eventMatch = any (eventEquals eventType) events
 
 -- | The gerritbot callback
-onEvent :: [Channel] -> TBMQueue MatrixEvent -> Gerrit.Event -> IO ()
-onEvent channels tqueue event =
+onEvent :: [Channel] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
+onEvent channels tqueue server event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
       putTextLn $ "Processing " <> show event
-      case mapMaybe (getEventRoom (Gerrit.getEventType event) change) channels of
+      case mapMaybe (getEventRoom server (Gerrit.getEventType event) change) channels of
         [] -> putTextLn "No channel matched"
         xs -> do
           putTextLn $ "Queuing notification to " <> show xs

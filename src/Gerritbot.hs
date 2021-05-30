@@ -22,7 +22,7 @@ data GerritServer = GerritServer
   }
 
 -- | 'runStreamClient' connects to a GerritServer with ssh and run the callback for each events.
-runStreamClient :: GerritServer -> [EventType] -> (Event -> IO ()) -> IO ()
+runStreamClient :: GerritServer -> [EventType] -> (GerritServer -> Event -> IO ()) -> IO ()
 runStreamClient gerritServer subscribeList cb = loop
   where
     -- Recover from exception and reconnect after 1 second
@@ -35,7 +35,7 @@ runStreamClient gerritServer subscribeList cb = loop
     -- Decode the event and callback
     onEvent evTxt = do
       case Aeson.decode $ encodeUtf8 evTxt of
-        Just v -> cb v
+        Just v -> cb gerritServer v
         Nothing -> err $ "Could not decode: " <> evTxt
     run = Turtle.foldIO sshProc (Fold.mapM_ (onEvent . Turtle.lineToText))
     command = ["gerrit", "stream-events"] <> concatMap (\e -> ["-s", eventName e]) subscribeList

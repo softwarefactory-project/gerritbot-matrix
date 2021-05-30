@@ -5,6 +5,7 @@
 module Main where
 
 import qualified Gerrit.Event as Gerrit
+import Gerritbot (GerritServer (..))
 import Gerritbot.Main hiding (main)
 import Gerritbot.Utils
 import Matrix (RoomID (..))
@@ -24,9 +25,10 @@ spec = describe "unit tests" $ do
         projects = ["software-factory/*"]
         branches = ["main"]
         events = [PatchsetCreated]
+        servers = ["*"]
         channel = Channel {..}
         change = fakeChange "software-factory/gerritbot-haskell" "main"
-     in getEventRoom Gerrit.PatchsetCreatedEvent change channel `shouldBe` Just (RoomID "testRoom")
+     in getEventRoom (GerritServer "" "") Gerrit.PatchsetCreatedEvent change channel `shouldBe` Just (RoomID "testRoom")
   it "group event" $ do
     let events =
           [ -- Sequencial events
