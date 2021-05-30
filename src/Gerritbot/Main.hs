@@ -168,8 +168,16 @@ main = do
     (forever $ runMatrix sess tqueue)
   putTextLn "Done."
   where
+    -- TODO: infer subscribe list from channels configuration
+    eventList =
+      [ Gerrit.ChangeAbandonedEvent,
+        Gerrit.ChangeDeletedEvent,
+        Gerrit.ChangeMergedEvent,
+        Gerrit.ChangeRestoredEvent,
+        Gerrit.PatchsetCreatedEvent
+      ]
     runGerrit server tqueue channels =
-      Gerritbot.runStreamClient server (onEvent channels tqueue)
+      Gerritbot.runStreamClient server eventList (onEvent channels tqueue)
     runMatrix sess tqueue = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue

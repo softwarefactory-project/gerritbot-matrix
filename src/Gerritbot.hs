@@ -8,9 +8,8 @@ import qualified Control.Foldl as Fold
 import Control.Monad.Catch (Handler (..))
 import qualified Control.Retry as Retry
 import qualified Data.Aeson as Aeson
-import qualified Data.Text as Text
 import Data.Text.IO (hPutStrLn)
-import Gerrit.Event (Event)
+import Gerrit.Event (Event, EventType, eventName)
 import Relude
 import qualified Turtle
 
@@ -23,8 +22,8 @@ data GerritServer = GerritServer
   }
 
 -- | 'runStreamClient' connects to a GerritServer with ssh and run the callback for each events.
-runStreamClient :: GerritServer -> (Event -> IO ()) -> IO ()
-runStreamClient gerritServer cb = loop
+runStreamClient :: GerritServer -> [EventType] -> (Event -> IO ()) -> IO ()
+runStreamClient gerritServer subscribeList cb = loop
   where
     -- Recover from exception and reconnect after 1 second
     loop = Retry.recovering (Retry.constantDelay 1000000) [\_ -> Handler handler] (const run)
@@ -33,17 +32,12 @@ runStreamClient gerritServer cb = loop
     handler code = do
       err $ "stream " <> show code
       pure True
-    -- Decode the event and skip ref-replicated
+    -- Decode the event and callback
     onEvent evTxt = do
       case Aeson.decode $ encodeUtf8 evTxt of
         Just v -> cb v
-        Nothing ->
-          if Text.isInfixOf "ref-replicat" evTxt
-            then pure ()
-            else err $ "Could not decode: " <> evTxt
+        Nothing -> err $ "Could not decode: " <> evTxt
     run = Turtle.foldIO sshProc (Fold.mapM_ (onEvent . Turtle.lineToText))
-    sshProc =
-      Turtle.inproc
-        "ssh"
-        ["-p", "29418", "-l", username gerritServer, host gerritServer, "gerrit", "stream-events"]
-        (pure mempty)
+    command = ["gerrit", "stream-events"] <> concatMap (\e -> ["-s", eventName e]) subscribeList
+    sshCommand = ["-p", "29418", "-l", username gerritServer, host gerritServer] <> command
+    sshProc = Turtle.inproc "ssh" sshCommand (pure mempty)
