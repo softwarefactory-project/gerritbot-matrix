@@ -90,9 +90,13 @@ toMatrixEvent Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
       _ -> "n/a"
     meObject = EventObject . DocBody $ changeInfo
     changeInfo =
-      [ DocText $ changeProject <> " " <> changeBranch <> ": ",
+      [ DocText $ "[" <> changeProject <> branch <> "] ",
         DocLink changeUrl changeSubject
       ]
+    branch =
+      if changeBranch `elem` ["master", "main"]
+        then ""
+        else " " <> changeBranch
 
 formatMessages :: EventAction -> [EventObject] -> Doc
 formatMessages (EventAction action) objects =
