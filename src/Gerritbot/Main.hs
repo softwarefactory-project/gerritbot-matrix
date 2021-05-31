@@ -19,7 +19,10 @@ module Gerritbot.Main where
 import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async as Async
 import Control.Concurrent.STM.TBMQueue (TBMQueue, newTBMQueueIO, writeTBMQueue)
+import Data.Bits ((.|.))
+import Data.Digest.Pure.SHA (sha1, showDigest)
 import qualified Data.HashMap.Strict as HM
+import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Dhall hiding (maybe)
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
@@ -72,14 +75,16 @@ newtype EventObject = EventObject {unObject :: Doc}
 data MatrixEvent = MatrixEvent
   { meAction :: EventAction,
     meObject :: EventObject,
-    meRoomId :: Matrix.RoomID
+    meRoomId :: Matrix.RoomID,
+    meTime :: Int64
   }
   deriving (Show, Eq)
 
 -- | Prepare a Matrix Event
-toMatrixEvent :: Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Matrix.RoomID -> MatrixEvent
-toMatrixEvent Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
+toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Matrix.RoomID -> MatrixEvent
+toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
   where
+    meTime = fromMaybe now (Gerrit.getCreatedOn event)
     meAction = EventAction . DocText $ author <> " " <> verb <> ":"
     author =
       fromMaybe
@@ -121,12 +126,13 @@ onEvent :: [Channel] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> 
 onEvent channels tqueue server event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
+      now <- getSystemTime
       putTextLn $ "Processing " <> show event
       case mapMaybe (getEventRoom server (Gerrit.getEventType event) change) channels of
         [] -> putTextLn "No channel matched"
         xs -> do
           putTextLn $ "Queuing notification to " <> show xs
-          mapM_ (queueMessage $ toMatrixEvent change user event) xs
+          mapM_ (queueMessage $ toMatrixEvent now change user event) xs
     _ -> pure mempty
   where
     queueMessage mkMatrixEvent roomId = do
@@ -134,11 +140,13 @@ onEvent channels tqueue server event =
 
 -- | Group events by room id and author
 -- See: https://hackage.haskell.org/package/relude-1.0.0.1/docs/Relude-Extra-Group.html#v:groupBy
-groupEvents :: [MatrixEvent] -> [(Matrix.RoomID, EventAction, [EventObject])]
+groupEvents :: [MatrixEvent] -> [(Matrix.RoomID, EventAction, Int64, [EventObject])]
 groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents events
   where
-    toGroup :: NonEmpty MatrixEvent -> (Matrix.RoomID, EventAction, [EventObject])
-    toGroup (x :| xs) = (meRoomId x, meAction x, fmap meObject (x : xs))
+    toGroup :: NonEmpty MatrixEvent -> (Matrix.RoomID, EventAction, Int64, [EventObject])
+    toGroup (x :| xs) = (meRoomId x, meAction x, mkTransactionId (x : xs), fmap meObject (x : xs))
+    mkTransactionId :: [MatrixEvent] -> Int64
+    mkTransactionId = foldr (.|.) 0 . fmap meTime
     groupUserEvent :: [MatrixEvent] -> [NonEmpty MatrixEvent]
     groupUserEvent = HM.elems . groupBy meAction
     groupRoomEvents :: [MatrixEvent] -> [[MatrixEvent]]
@@ -150,12 +158,13 @@ sendEvents sess events = do
   logMsg $ "Sending events " <> show events
   mapM_ send (groupEvents events)
   where
-    send :: (Matrix.RoomID, EventAction, [EventObject]) -> IO ()
-    send (roomID, author, messages) = do
+    send :: (Matrix.RoomID, EventAction, Int64, [EventObject]) -> IO ()
+    send (roomID, author, ts, messages) = do
       let messageDoc = formatMessages author messages
           text = renderText messageDoc
           html = renderHtml messageDoc
-      res <- Matrix.sendMessage sess roomID text html
+          txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ text <> show ts
+      res <- Matrix.sendMessage sess roomID text html txnId
       print res
 
 -- | Sync the matrix client

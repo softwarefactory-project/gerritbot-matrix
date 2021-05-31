@@ -8,12 +8,11 @@ module Matrix where
 
 import Control.Monad (mzero)
 import Data.Aeson
-import Data.Digest.Pure.SHA (sha1, showDigest)
-import Data.Text (Text, pack, unpack)
+import Data.Text (Text, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Relude (Hashable, toLazy)
+import Relude (Hashable)
 
 data Session = Session
   { baseUrl :: Text,
@@ -74,9 +73,9 @@ instance ToJSON MessageEvent where
         "formatted_body" .= meFormattedBody msg
       ]
 
-sendMessage :: Session -> RoomID -> Text -> Text -> IO EventID
-sendMessage session (RoomID roomId) body bodyHTML = do
-  request <- mkRequest session $ "/_matrix/client/r0/rooms/" <> roomId <> "/send/m.room.message/" <> ctx
+sendMessage :: Session -> RoomID -> Text -> Text -> Text -> IO EventID
+sendMessage session (RoomID roomId) body bodyHTML txnId = do
+  request <- mkRequest session $ "/_matrix/client/r0/rooms/" <> roomId <> "/send/m.room.message/" <> txnId
   doRequest
     session
     ( request
@@ -85,7 +84,6 @@ sendMessage session (RoomID roomId) body bodyHTML = do
         }
     )
   where
-    ctx = pack . showDigest . sha1 . toLazy . encodeUtf8 $ body
     putData = MessageEvent "m.notice" body "org.matrix.custom.html" bodyHTML
 
 instance FromJSON RoomID where

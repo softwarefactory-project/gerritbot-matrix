@@ -32,22 +32,22 @@ spec = describe "unit tests" $ do
   it "group event" $ do
     let events =
           [ -- Sequencial events
-            MatrixEvent action1 object1 room1,
-            MatrixEvent action1 object2 room1,
+            MatrixEvent action1 object1 room1 0,
+            MatrixEvent action1 object2 room1 0,
             -- Interleaved events
-            MatrixEvent action2 object1 room2,
-            MatrixEvent action2 object1 room1,
-            MatrixEvent action2 object2 room2,
-            MatrixEvent action2 object2 room1,
+            MatrixEvent action2 object1 room2 0,
+            MatrixEvent action2 object1 room1 0,
+            MatrixEvent action2 object2 room2 0,
+            MatrixEvent action2 object2 room1 0,
             -- Out of order
-            MatrixEvent action3 object2 room1,
-            MatrixEvent action3 object1 room1
+            MatrixEvent action3 object2 room1 0,
+            MatrixEvent action3 object1 room1 0
           ]
      in groupEvents events
-          `shouldBe` [ (room1, action2, [object1, object2]),
-                       (room1, action1, [object1, object2]),
-                       (room1, action3, [object2, object1]),
-                       (room2, action2, [object1, object2])
+          `shouldBe` [ (room1, action2, 0, [object1, object2]),
+                       (room1, action1, 0, [object1, object2]),
+                       (room1, action3, 0, [object2, object1]),
+                       (room2, action2, 0, [object1, object2])
                      ]
   it "format oneline" $ do
     renderText (formatMessages action1 [object1])
