@@ -36,6 +36,7 @@ library
                     , SHA                    ^>= 1.6
                     , aeson
                     , async                  ^>= 2.2
+                    , base64
                     , dhall
                     , exceptions
                     , foldl

@@ -8,11 +8,14 @@ module Matrix where
 
 import Control.Monad (mzero)
 import Data.Aeson
+import Data.ByteString.Lazy.Base64.URL (encodeBase64Unpadded)
+import Data.Digest.Pure.SHA (bytestringDigest, sha256)
+import qualified Data.HashMap.Strict as HM
 import Data.Text (Text, unpack)
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (tlsManagerSettings)
-import Relude (Hashable)
+import Relude (Hashable, toLazy, toStrict)
 
 data Session = Session
   { baseUrl :: Text,
@@ -191,3 +194,38 @@ hashDetails :: Session -> IO HashDetails
 hashDetails session = do
   request <- mkRequest session "/_matrix/identity/v2/hash_details"
   doRequest session request
+
+newtype Email = Email Text deriving (Show)
+
+newtype UserID = UserID Text deriving (Show)
+
+encodeSHA256 :: Text -> Text
+encodeSHA256 = toStrict . encodeBase64Unpadded . bytestringDigest . sha256 . toLazy . encodeUtf8
+
+identityLookup :: Session -> HashDetails -> Email -> IO (Maybe UserID)
+identityLookup session hashDetails' (Email email) = do
+  request <- mkRequest session "/_matrix/identity/v2/lookup"
+  lookupUser
+    <$> doRequest
+      session
+      ( request
+          { HTTP.method = "POST",
+            HTTP.requestBody = HTTP.RequestBodyLBS body
+          }
+      )
+  where
+    lookupUser resp = case resp of
+      Object kv -> case HM.lookup "mappings" kv of
+        Just (Object kv') -> case HM.lookup address kv' of
+          Just (String v) -> Just (UserID v)
+          _ -> Nothing
+        _ -> Nothing
+      _ -> Nothing
+    body =
+      encode $
+        object
+          [ "addresses" .= [address],
+            "algorithm" .= head (hdAlgorithms hashDetails'),
+            "pepper" .= hdPepper hashDetails'
+          ]
+    address = encodeSHA256 (email <> " email " <> hdPepper hashDetails')

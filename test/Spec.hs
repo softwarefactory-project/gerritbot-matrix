@@ -8,7 +8,7 @@ import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import Gerritbot.Main hiding (main)
 import Gerritbot.Utils
-import Matrix (RoomID (..))
+import Matrix (RoomID (..), encodeSHA256)
 import Relude
 import Test.Hspec
 
@@ -61,6 +61,8 @@ spec = describe "unit tests" $ do
   it "format html multiline" $ do
     renderHtml (formatMessages action1 [object1, object2])
       `shouldBe` "foo proposed:\n<ul><li>change1 <a href=\"localhost\">title</a></li><li>change2</li></ul>"
+  it "format email" $ do
+    encodeSHA256 "alice@example.com email matrixrocks" `shouldBe` "4kenr7N9drpCJ4AfalmlGQVsOn3o2RHjkADUpXJWZUc"
   where
     (action1, action2, action3) =
       ( EventAction "foo proposed:",
