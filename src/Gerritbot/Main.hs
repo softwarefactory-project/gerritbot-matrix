@@ -41,7 +41,8 @@ data CLI w = CLI
     gerritUser :: w ::: Text <?> "The gerrit username",
     matrixUrl :: w ::: Text <?> "The matrix url",
     configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
-    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)"
+    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)",
+    createToken :: w ::: Bool <?> "Create identity token"
   }
   deriving stock (Generic)
 
@@ -177,6 +178,10 @@ doSyncClient sess = mapM_ joinRoom
       res <- Matrix.joinRoom sess (Matrix.RoomID roomId)
       print res
 
+doCreateToken :: Matrix.Session -> IO Text
+doCreateToken _sess = do
+  error "TODO"
+
 -- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
@@ -185,6 +190,9 @@ main = do
   sess <- Matrix.createSession (matrixUrl args) $! toText token
   channels <- Dhall.input auto (toText $ configFile args)
   when (syncClient args) (doSyncClient sess channels)
+  when (createToken args) (doCreateToken sess >>= putTextLn)
+  idToken <- fromMaybe (error "Missing MATRIX_IDENTITY_TOKEN environment") <$> lookupEnv "MATRIX_IDENTITY_TOKEN"
+  let _idSess = sess {Matrix.token = toText $! idToken}
   tqueue <- newTBMQueueIO 2048
   Async.concurrently_
     (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels)

@@ -4,8 +4,11 @@ A matrix version of the [gerritbot][gerritbot].
 
 ## Usage
 
-Create a `MATRIX_TOKEN` environement variable.
+Create a `MATRIX_TOKEN` environment variable.
 You can get it from element by visiting the account `Settings` page, `Help & About` panel, then click `Access Token`.
+
+Create a `MATRIX_IDENTITY_TOKEN` environment variable.
+You have to create an OpenId token from the MATRIX_TOKEN, then register to the identity API and accept the terms.
 
 Then setup the configuration by editing the `gerritbot.dhall` file.
 

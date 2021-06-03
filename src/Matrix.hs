@@ -26,7 +26,13 @@ createSession baseUrl token = Session baseUrl token <$> HTTP.newManager tlsManag
 mkRequest :: Session -> Text -> IO HTTP.Request
 mkRequest Session {..} path = do
   initRequest <- HTTP.parseUrlThrow (unpack $ baseUrl <> path)
-  pure $ HTTP.setQueryString [("access_token", Just $ encodeUtf8 token)] initRequest
+  pure $
+    initRequest
+      { HTTP.requestHeaders =
+          [ ("Authorization", "Bearer " <> encodeUtf8 token),
+            ("Content-Type", "application/json")
+          ]
+      }
 
 doRequest :: FromJSON a => Session -> HTTP.Request -> IO a
 doRequest Session {..} request = do
@@ -45,6 +51,44 @@ checkAccount :: Session -> IO WhoAmI
 checkAccount session = do
   request <- mkRequest session "/_matrix/client/r0/account/whoami"
   doRequest session request
+
+data OpenIDToken = OpenIDToken
+  { oiAccessToken :: Text,
+    oiTokenType :: Text,
+    oiMatrixServerName :: Text,
+    oiExpiresIn :: Int
+  }
+  deriving (Show)
+
+instance FromJSON OpenIDToken where
+  parseJSON (Object v) =
+    OpenIDToken
+      <$> v .: "access_token"
+      <*> v .: "token_type"
+      <*> v .: "matrix_server_name"
+      <*> v .: "expires_in"
+  parseJSON _ = mzero
+
+instance ToJSON OpenIDToken where
+  toJSON OpenIDToken {..} =
+    object
+      [ "access_token" .= oiAccessToken,
+        "token_type" .= oiTokenType,
+        "matrix_server_name" .= oiMatrixServerName,
+        "expires_in" .= oiExpiresIn
+      ]
+
+getOpenIdToken :: Session -> IO OpenIDToken
+getOpenIdToken session = do
+  WhoAmI userId <- checkAccount session
+  request <- mkRequest session $ "/_matrix/client/r0/user/" <> userId <> "/openid/request_token"
+  doRequest
+    session
+    ( request
+        { HTTP.method = "POST",
+          HTTP.requestBody = HTTP.RequestBodyLBS "{}" -- otherwise call fails with M_NOT_JSON
+        }
+    )
 
 newtype RoomID = RoomID Text
   deriving (Show, Eq)
@@ -94,3 +138,56 @@ joinRoom :: Session -> RoomID -> IO RoomID
 joinRoom session (RoomID roomId) = do
   request <- mkRequest session $ "/_matrix/client/r0/rooms/" <> roomId <> "/join"
   doRequest session (request {HTTP.method = "POST"})
+
+newtype IdentityToken = IdentityToken Text
+
+instance FromJSON IdentityToken where
+  parseJSON (Object v) = IdentityToken <$> v .: "token"
+  parseJSON _ = mzero
+
+registerIdentityAccount :: Session -> OpenIDToken -> IO IdentityToken
+registerIdentityAccount session openIDToken = do
+  request <- mkRequest session "/_matrix/identity/v2/account/register"
+  doRequest
+    session
+    ( request
+        { HTTP.method = "POST",
+          HTTP.requestBody = HTTP.RequestBodyLBS $ encode openIDToken
+        }
+    )
+
+acceptPolicies :: Session -> [Text] -> IO Value
+acceptPolicies session policies = do
+  request <- mkRequest session "/_matrix/identity/v2/terms"
+  doRequest
+    session
+    ( request
+        { HTTP.method = "POST",
+          HTTP.requestBody = HTTP.RequestBodyLBS $ encode $ object ["user_accepts" .= policies]
+        }
+    )
+
+createIdentitySession :: Session -> OpenIDToken -> IO Session
+createIdentitySession session openIDToken = do
+  IdentityToken token <- registerIdentityAccount session openIDToken
+  pure $ session {token = token}
+
+data HashDetails = HashDetails
+  { hdAlgorithms :: [Text],
+    hdPepper :: Text
+  }
+  deriving (Show)
+
+instance FromJSON HashDetails where
+  parseJSON (Object v) = HashDetails <$> v .: "algorithms" <*> v .: "lookup_pepper"
+  parseJSON _ = mzero
+
+checkIdentityAccount :: Session -> IO WhoAmI
+checkIdentityAccount session = do
+  request <- mkRequest session "/_matrix/identity/v2/account"
+  doRequest session request
+
+hashDetails :: Session -> IO HashDetails
+hashDetails session = do
+  request <- mkRequest session "/_matrix/identity/v2/hash_details"
+  doRequest session request
