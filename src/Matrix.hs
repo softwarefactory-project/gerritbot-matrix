@@ -197,7 +197,7 @@ hashDetails session = do
 
 newtype Email = Email Text deriving (Show)
 
-newtype UserID = UserID Text deriving (Show)
+newtype UserID = UserID {unId :: Text} deriving (Show)
 
 encodeSHA256 :: Text -> Text
 encodeSHA256 = toStrict . encodeBase64Unpadded . bytestringDigest . sha256 . toLazy . encodeUtf8

@@ -29,6 +29,7 @@ common common-options
 library
     import:           common-options
     exposed-modules:  Gerritbot
+                    , Gerritbot.Database
                     , Gerritbot.Main
                     , Gerritbot.Utils
                     , Matrix
@@ -41,6 +42,7 @@ library
                     , exceptions
                     , foldl
                     , gerrit
+                    , hashtables
                     , http-client            ^>= 0.7
                     , http-client-tls        ^>= 0.3
                     , optparse-generic       ^>= 1.4

@@ -28,6 +28,7 @@ import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import qualified Gerritbot
+import qualified Gerritbot.Database as DB
 import Gerritbot.Utils
 import qualified Matrix
 import Options.Generic
@@ -65,9 +66,12 @@ eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
   (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
   _ -> False
 
-newtype EventAction = EventAction Doc
-  deriving (Show, Eq)
-  deriving newtype (Hashable)
+data EventAction = EventAction
+  { eaAuthor :: Text,
+    eaAuthorMail :: Maybe Text,
+    eaAction :: Doc
+  }
+  deriving (Show, Eq, Generic, Hashable)
 
 newtype EventObject = EventObject {unObject :: Doc}
   deriving (Show, Eq)
@@ -86,11 +90,13 @@ toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> M
 toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
   where
     meTime = fromMaybe now (Gerrit.getCreatedOn event)
-    meAction = EventAction . DocText $ author <> " " <> verb <> ":"
-    author =
+    meAction = EventAction {..}
+    eaAction = DocText $ " " <> verb <> ":"
+    eaAuthorMail = Gerrit.userEmail user
+    eaAuthor =
       fromMaybe
         "Anonymous User"
-        (Gerrit.userName user <|> Gerrit.userUsername user <|> Gerrit.userEmail user)
+        (Gerrit.userName user <|> Gerrit.userUsername user <|> eaAuthorMail)
     verb = case event of
       Gerrit.EventPatchsetCreated _ -> "proposed"
       Gerrit.EventChangeMerged _ -> "merged"
@@ -105,10 +111,6 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = Matr
       if changeBranch `elem` ["master", "main"]
         then ""
         else " " <> changeBranch
-
-formatMessages :: EventAction -> [EventObject] -> Doc
-formatMessages (EventAction action) objects =
-  DocBody [action, DocList $ fmap unObject objects]
 
 -- | Find if a channel match a change, return the roomId
 getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
@@ -154,14 +156,21 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
     groupRoomEvents = fmap toList . HM.elems . groupBy meRoomId
 
 -- | The matrix client
-sendEvents :: Matrix.Session -> [MatrixEvent] -> IO ()
-sendEvents sess events = do
+sendEvents :: Matrix.Session -> (Text -> IO (Maybe Text)) -> [MatrixEvent] -> IO ()
+sendEvents sess idLookup events = do
   logMsg $ "Sending events " <> show events
   mapM_ send (groupEvents events)
   where
     send :: (Matrix.RoomID, EventAction, Int64, [EventObject]) -> IO ()
-    send (roomID, author, ts, messages) = do
-      let messageDoc = formatMessages author messages
+    send (roomID, EventAction {..}, ts, messages) = do
+      authorDoc <- case eaAuthorMail of
+        Just mail -> do
+          userIdM <- idLookup mail
+          pure $ case userIdM of
+            Just userId -> DocLink ("https://matrix.to/#/" <> userId) eaAuthor
+            Nothing -> DocText eaAuthor
+        Nothing -> pure $ DocText eaAuthor
+      let messageDoc = DocBody [authorDoc, eaAction, DocList $ fmap unObject messages]
           text = renderText messageDoc
           html = renderHtml messageDoc
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ text <> show ts
@@ -185,18 +194,30 @@ doCreateToken _sess = do
 -- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
+  -- Load the environment
   args <- unwrapRecord "Gerritbot Matrix"
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
-  sess <- Matrix.createSession (matrixUrl args) $! toText token
+  idTokenM <- lookupEnv "MATRIX_IDENTITY_TOKEN"
+  idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
   channels <- Dhall.input auto (toText $ configFile args)
+  -- Create http manager
+  sess <- Matrix.createSession (matrixUrl args) $! toText token
+  idLookup <- case (idTokenM, idPepperM) of
+    (Just idToken, Just idPepper) -> do
+      pure $
+        mkIdLookup
+          (sess {Matrix.token = toText $! idToken})
+          (hashDetails $! idPepper)
+    _ -> do
+      putTextLn "Skipping user id lookup"
+      pure . const . pure $ Nothing
   when (syncClient args) (doSyncClient sess channels)
   when (createToken args) (doCreateToken sess >>= putTextLn)
-  idToken <- fromMaybe (error "Missing MATRIX_IDENTITY_TOKEN environment") <$> lookupEnv "MATRIX_IDENTITY_TOKEN"
-  let _idSess = sess {Matrix.token = toText $! idToken}
+  db <- DB.new
   tqueue <- newTBMQueueIO 2048
   Async.concurrently_
     (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels)
-    (forever $ runMatrix sess tqueue)
+    (forever $ runMatrix sess (DB.get db idLookup) tqueue)
   putTextLn "Done."
   where
     -- TODO: infer subscribe list from channels configuration
@@ -207,10 +228,15 @@ main = do
         Gerrit.ChangeRestoredEvent,
         Gerrit.PatchsetCreatedEvent
       ]
+    -- TODO: fetch from server
+    hashDetails = Matrix.HashDetails ["sha256"] . toText
+    mkIdLookup idSess hd email = do
+      res <- Matrix.identityLookup idSess hd (Matrix.Email email)
+      pure $ Matrix.unId <$> res
     runGerrit server tqueue channels =
       Gerritbot.runStreamClient server eventList (onEvent channels tqueue)
-    runMatrix sess tqueue = do
+    runMatrix sess idLookup tqueue = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
-      sendEvents sess events
+      sendEvents sess idLookup events
       threadDelay 100_000

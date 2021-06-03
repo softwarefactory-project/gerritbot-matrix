@@ -44,8 +44,8 @@ spec = describe "unit tests" $ do
             MatrixEvent action3 object1 room1 0
           ]
      in groupEvents events
-          `shouldBe` [ (room1, action2, 0, [object1, object2]),
-                       (room1, action1, 0, [object1, object2]),
+          `shouldBe` [ (room1, action1, 0, [object1, object2]),
+                       (room1, action2, 0, [object1, object2]),
                        (room1, action3, 0, [object2, object1]),
                        (room2, action2, 0, [object1, object2])
                      ]
@@ -65,14 +65,16 @@ spec = describe "unit tests" $ do
     encodeSHA256 "alice@example.com email matrixrocks" `shouldBe` "4kenr7N9drpCJ4AfalmlGQVsOn3o2RHjkADUpXJWZUc"
   where
     (action1, action2, action3) =
-      ( EventAction "foo proposed:",
-        EventAction "foo merge:",
-        EventAction "bar do:"
+      ( EventAction "" Nothing "foo proposed:",
+        EventAction "" Nothing "foo merge:",
+        EventAction "" Nothing "bar do:"
       )
     (object1, object2) =
       (EventObject $ DocBody ["change1 ", DocLink "localhost" "title"], EventObject "change2")
     (room1, room2) =
       (RoomID "room1", RoomID "room2")
+    formatMessages (EventAction _ _ action) objects =
+      DocBody [action, DocList $ fmap unObject objects]
     fakeUser :: Gerrit.User
     fakeUser = Gerrit.User (Just "tristan") Nothing Nothing
     fakeChange :: Text -> Text -> Gerrit.Change
