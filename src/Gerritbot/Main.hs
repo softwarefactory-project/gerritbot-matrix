@@ -30,10 +30,13 @@ import Gerritbot (GerritServer (..))
 import qualified Gerritbot
 import qualified Gerritbot.Database as DB
 import Gerritbot.Utils
-import qualified Matrix
+import Network.Matrix.Client (ClientSession, MatrixToken (..), RoomID (..))
+import qualified Network.Matrix.Client as Matrix
+import qualified Network.Matrix.Identity as Matrix
 import Options.Generic
 import Relude
 import Relude.Extra.Group (groupBy)
+import Say (sayErr)
 
 -- | Command line interface
 -- See: http://hackage.haskell.org/package/optparse-generic-1.4.4/docs/Options-Generic.html
@@ -42,8 +45,7 @@ data CLI w = CLI
     gerritUser :: w ::: Text <?> "The gerrit username",
     matrixUrl :: w ::: Text <?> "The matrix url",
     configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
-    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)",
-    createToken :: w ::: Bool <?> "Create identity token"
+    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)"
   }
   deriving stock (Generic)
 
@@ -80,13 +82,13 @@ newtype EventObject = EventObject {unObject :: Doc}
 data MatrixEvent = MatrixEvent
   { meAction :: EventAction,
     meObject :: EventObject,
-    meRoomId :: Matrix.RoomID,
+    meRoomId :: RoomID,
     meTime :: Int64
   }
   deriving (Show, Eq)
 
 -- | Prepare a Matrix Event
-toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Matrix.RoomID -> MatrixEvent
+toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> RoomID -> MatrixEvent
 toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
   where
     meTime = fromMaybe now (Gerrit.getCreatedOn event)
@@ -113,9 +115,9 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = Matr
         else " " <> changeBranch
 
 -- | Find if a channel match a change, return the roomId
-getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Matrix.RoomID
+getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe RoomID
 getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
-  | serverMatch && projectMatch && branchMatch && eventMatch = Just (Matrix.RoomID roomId)
+  | serverMatch && projectMatch && branchMatch && eventMatch = Just (RoomID roomId)
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
@@ -143,10 +145,10 @@ onEvent channels tqueue server event =
 
 -- | Group events by room id and author
 -- See: https://hackage.haskell.org/package/relude-1.0.0.1/docs/Relude-Extra-Group.html#v:groupBy
-groupEvents :: [MatrixEvent] -> [(Matrix.RoomID, EventAction, Int64, [EventObject])]
+groupEvents :: [MatrixEvent] -> [(RoomID, EventAction, Int64, [EventObject])]
 groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents events
   where
-    toGroup :: NonEmpty MatrixEvent -> (Matrix.RoomID, EventAction, Int64, [EventObject])
+    toGroup :: NonEmpty MatrixEvent -> (RoomID, EventAction, Int64, [EventObject])
     toGroup (x :| xs) = (meRoomId x, meAction x, mkTransactionId (x : xs), fmap meObject (x : xs))
     mkTransactionId :: [MatrixEvent] -> Int64
     mkTransactionId = foldr (.|.) 0 . fmap meTime
@@ -156,12 +158,12 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
     groupRoomEvents = fmap toList . HM.elems . groupBy meRoomId
 
 -- | The matrix client
-sendEvents :: Matrix.Session -> (Text -> IO (Maybe Text)) -> [MatrixEvent] -> IO ()
+sendEvents :: ClientSession -> (Text -> IO (Maybe Text)) -> [MatrixEvent] -> IO ()
 sendEvents sess idLookup events = do
   logMsg $ "Sending events " <> show events
   mapM_ send (groupEvents events)
   where
-    send :: (Matrix.RoomID, EventAction, Int64, [EventObject]) -> IO ()
+    send :: (RoomID, EventAction, Int64, [EventObject]) -> IO ()
     send (roomID, EventAction {..}, ts, messages) = do
       authorDoc <- case eaAuthorMail of
         Just mail -> do
@@ -171,25 +173,23 @@ sendEvents sess idLookup events = do
             Nothing -> DocText eaAuthor
         Nothing -> pure $ DocText eaAuthor
       let messageDoc = DocBody [authorDoc, eaAction, DocList $ fmap unObject messages]
-          text = renderText messageDoc
-          html = renderHtml messageDoc
-          txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ text <> show ts
-      res <- Matrix.sendMessage sess roomID text html txnId
+          mtBody = renderText messageDoc
+          mtFormat = Just "org.matrix.custom.html"
+          mtFormattedBody = Just $ renderHtml messageDoc
+          txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
+          roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
+      res <- Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
       print res
 
 -- | Sync the matrix client
-doSyncClient :: Matrix.Session -> [Channel] -> IO ()
+doSyncClient :: ClientSession -> [Channel] -> IO ()
 doSyncClient sess = mapM_ joinRoom
   where
     joinRoom :: Channel -> IO ()
     joinRoom Channel {..} = do
       logMsg $ "Joining room " <> show roomId
-      res <- Matrix.joinRoom sess (Matrix.RoomID roomId)
+      res <- Matrix.joinRoomById sess (Matrix.RoomID roomId)
       print res
-
-doCreateToken :: Matrix.Session -> IO Text
-doCreateToken _sess = do
-  error "TODO"
 
 -- | gerritbot-matrix entrypoint
 main :: IO ()
@@ -201,18 +201,15 @@ main = do
   idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
   channels <- Dhall.input auto (toText $ configFile args)
   -- Create http manager
-  sess <- Matrix.createSession (matrixUrl args) $! toText token
+  sess <- Matrix.createSession (matrixUrl args) $! MatrixToken (toText token)
   idLookup <- case (idTokenM, idPepperM) of
     (Just idToken, Just idPepper) -> do
-      pure $
-        mkIdLookup
-          (sess {Matrix.token = toText $! idToken})
-          (hashDetails $! idPepper)
+      idSess <- Matrix.createIdentitySession (matrixUrl args) $! MatrixToken (toText idToken)
+      pure $ mkIdLookup idSess (hashDetails $! idPepper)
     _ -> do
       putTextLn "Skipping user id lookup"
       pure . const . pure $ Nothing
   when (syncClient args) (doSyncClient sess channels)
-  when (createToken args) (doCreateToken sess >>= putTextLn)
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
   Async.concurrently_
@@ -229,10 +226,13 @@ main = do
         Gerrit.PatchsetCreatedEvent
       ]
     -- TODO: fetch from server
-    hashDetails = Matrix.HashDetails ["sha256"] . toText
+    hashDetails = Matrix.HashDetails ("sha256" :| []) . toText
     mkIdLookup idSess hd email = do
       res <- Matrix.identityLookup idSess hd (Matrix.Email email)
-      pure $ Matrix.unId <$> res
+      case res of
+        Right (Just (Matrix.UserID x)) -> pure $ Just x
+        Right Nothing -> pure Nothing
+        Left e -> sayErr ("Lookup failed: " <> show e) >> pure Nothing
     runGerrit server tqueue channels =
       Gerritbot.runStreamClient server eventList (onEvent channels tqueue)
     runMatrix sess idLookup tqueue = do

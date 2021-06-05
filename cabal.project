@@ -1,1 +1,1 @@
-packages: . ../gerrit-haskell/
+packages: . ../gerrit-haskell/ ../matrix-client-haskell/
