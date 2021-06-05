@@ -32,19 +32,16 @@ library
                     , Gerritbot.Database
                     , Gerritbot.Main
                     , Gerritbot.Utils
-                    , Matrix
     build-depends:    base < 5
                     , SHA                    ^>= 1.6
                     , aeson
                     , async                  ^>= 2.2
-                    , base64
                     , dhall
                     , exceptions
                     , foldl
                     , gerrit
                     , hashtables
-                    , http-client            ^>= 0.7
-                    , http-client-tls        ^>= 0.3
+                    , matrix-client
                     , optparse-generic       ^>= 1.4
                     , relude >= 1.0
                     , retry
@@ -72,5 +69,6 @@ test-suite unit
   build-depends:      base
                     , gerritbot-matrix
                     , gerrit
+                    , matrix-client
                     , relude
                     , hspec >= 2
