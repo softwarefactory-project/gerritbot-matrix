@@ -28,6 +28,9 @@ RUN cabal v2-install -v1 exe:gerritbot-matrix
 
 # The final image
 FROM registry.fedoraproject.org/fedora:33
+# Install dependencies
+RUN dnf update -y && dnf install -y openssh-clients && dnf clean all
+
 COPY --from=0 ["/root/.cabal/bin/gerritbot-matrix", "/bin"]
 ENTRYPOINT ["gerritbot-matrix"]
 LABEL description="A gerritbot for matrix"

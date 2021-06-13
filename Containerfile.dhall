@@ -58,6 +58,9 @@ let image =
       # Containerfile.emptyLine
       # [ Containerfile.Statement.Comment "The final image" ]
       # Containerfile.from base
+      # Containerfile.run
+          "Install dependencies"
+          [ "dnf update -y", "dnf install -y openssh-clients", "dnf clean all" ]
       # Containerfile.copyFrom
           "0"
           [ "/root/.cabal/bin/gerritbot-matrix", "/bin" ]
