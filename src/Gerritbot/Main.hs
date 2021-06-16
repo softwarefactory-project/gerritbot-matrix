@@ -178,7 +178,7 @@ sendEvents sess idLookup events = do
           mtFormattedBody = Just $ renderHtml messageDoc
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
           roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
-      res <- Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
+      res <- Matrix.retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
       print res
 
 -- | Sync the matrix client
