@@ -30,12 +30,6 @@ Build and run the project:
 $ cabal run gerritbot-matrix -- --help
 ```
 
-Build the container:
-
-```ShellSession
-$ TMPDIR=/tmp podman build -t quay.io/software-factory/gerritbot-matrix .
-```
-
 If you experience any difficulties, please don't hesistate to raise an issue.
 
 [gerritbot]: https://opendev.org/opendev/gerritbot

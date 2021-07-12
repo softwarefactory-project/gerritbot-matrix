@@ -44,6 +44,11 @@ logMsg msg = do
   th <- myThreadId
   say $ show now <> " [" <> show th <> "]: " <> msg
 
+eitherToError :: Show a => Text -> Either a b -> b
+eitherToError msg x = case x of
+  Left err -> error $ msg <> ": " <> show err
+  Right b -> b
+
 -- | Helper function to group queue event based on a time limit
 bufferQueueRead :: Int -> TBMQueue a -> IO [a]
 bufferQueueRead maxTime tqueue = do

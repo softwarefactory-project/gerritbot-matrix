@@ -189,7 +189,7 @@ doSyncClient sess = traverse joinRoom
     joinRoom :: Channel -> IO RoomID
     joinRoom Channel {..} = do
       logMsg $ "Joining room " <> room
-      fromRight (error $ "Failed to join: " <> room)
+      eitherToError ("Failed to join " <> room)
         <$> Matrix.retry (Matrix.joinRoom sess room)
 
 -- | gerritbot-matrix entrypoint
@@ -214,6 +214,7 @@ main = do
 
   -- Join rooms
   roomIds <- doSyncClient sess channels
+  putTextLn $ "Joined: " <> show roomIds
   let channels' = zip roomIds channels
 
   -- Setup queue

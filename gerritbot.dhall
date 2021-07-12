@@ -19,12 +19,12 @@ in  [ Config::{
       , servers = [ "softwarefactory-project.io" ]
       }
     , Config::{
-      , room = "#rdo-dev:matrix.org"
+      , room = "!RVsCBSBPpQxhCyVEcB:matrix.org"
       , projects = [ "rdo-infra/*" ] # rdo-configs
       , servers = [ "review.rdoproject.org" ]
       }
     , Config::{
-      , room = "#rdo:matrix.org"
+      , room = "!SoKrrlUlCZgGfhjYsr:matrix.org"
       , projects = [ "openstack/*", "puppet/*" ] # rdo-configs
       , servers = [ "review.rdoproject.org" ]
       }
