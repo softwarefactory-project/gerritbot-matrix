@@ -43,7 +43,8 @@ import Say (sayErr)
 data CLI w = CLI
   { gerritHost :: w ::: Text <?> "The gerrit host",
     gerritUser :: w ::: Text <?> "The gerrit username",
-    matrixUrl :: w ::: Text <?> "The matrix url",
+    homeserverUrl :: w ::: Text <?> "The matrix homeserver url",
+    identityUrl :: w ::: Maybe Text <?> "The matrix identity url",
     configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
     syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)"
   }
@@ -201,14 +202,14 @@ main = do
   idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
   channels <- Dhall.input auto (toText $ configFile args)
   -- Create http manager
-  sess <- Matrix.createSession (matrixUrl args) $! MatrixToken (toText token)
-  idLookup <- case (idTokenM, idPepperM) of
-    (Just idToken, Just idPepper) -> do
-      idSess <- Matrix.createIdentitySession (matrixUrl args) $! MatrixToken (toText idToken)
+  sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
+  idLookup <- case (identityUrl args, idTokenM, idPepperM) of
+    (Just identityUrl, Just idToken, Just idPepper) -> do
+      idSess <- Matrix.createIdentitySession identityUrl $! MatrixToken (toText idToken)
       pure $ mkIdLookup idSess (hashDetails $! idPepper)
-    _ -> do
-      putTextLn "Skipping user id lookup"
-      pure . const . pure $ Nothing
+    (Just _, _, _) ->
+      error "Missing MATRIX_IDENTITY_TOKEN or MATRIX_IDENTITY_PEPPER environment"
+    (Nothing, _, _) -> pure . const . pure $ Nothing
   when (syncClient args) (doSyncClient sess channels)
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
