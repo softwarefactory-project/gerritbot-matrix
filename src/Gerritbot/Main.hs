@@ -56,7 +56,7 @@ instance ParseRecord (CLI Wrapped) where
 -- | Generate Haskell Type from Dhall Type
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
 Dhall.TH.makeHaskellTypes
-  [ Dhall.TH.MultipleConstructors "EventType" "./src/EventType.dhall",
+  [ Dhall.TH.MultipleConstructors "EventType" "(./src/Config.dhall).Event",
     Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"
   ]
 

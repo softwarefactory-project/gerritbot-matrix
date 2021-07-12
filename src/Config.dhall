@@ -1,5 +1,5 @@
 -- | The gerritbot channel configuration
-let Event = ./EventType.dhall
+let Event = < PatchsetCreated | ChangeMerged >
 
 in  { Type =
         { roomId : Text
@@ -13,4 +13,5 @@ in  { Type =
       , servers = [ "*" ]
       , events = [ Event.PatchsetCreated, Event.ChangeMerged ]
       }
+    , Event
     }
