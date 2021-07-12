@@ -40,7 +40,7 @@ let image =
       # clone-dep
           "https://softwarefactory-project.io/r/software-factory"
           "matrix-client-haskell"
-          "44e9b74e00edf14ed9a15b778f750c1dfc7e4d6a"
+          "bc64d7c8c4414f8282ef08721aebe4b427a807fc"
       # Containerfile.copy
           [ "cabal.project"
           , "gerritbot-matrix.cabal"

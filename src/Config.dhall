@@ -2,7 +2,7 @@
 let Event = < PatchsetCreated | ChangeMerged >
 
 in  { Type =
-        { roomId : Text
+        { room : Text
         , projects : List Text
         , branches : List Text
         , servers : List Text

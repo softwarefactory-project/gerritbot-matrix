@@ -21,14 +21,15 @@ spec = describe "unit tests" $ do
     glob "software-factory/*" "software-factory/gerritbot-haskell"
       `shouldBe` True
   it "match config" $ do
-    let roomId = "testRoom"
+    let room = "testRoom"
         projects = ["software-factory/*"]
         branches = ["main"]
         events = [PatchsetCreated]
         servers = ["*"]
         channel = Channel {..}
         change = fakeChange "software-factory/gerritbot-haskell" "main"
-     in getEventRoom (GerritServer "" "") Gerrit.PatchsetCreatedEvent change channel `shouldBe` Just (RoomID "testRoom")
+     in getEventRoom (GerritServer "" "") Gerrit.PatchsetCreatedEvent change (RoomID "!testRoom", channel)
+          `shouldBe` Just (RoomID "!testRoom")
   it "group event" $ do
     let events =
           [ -- Sequencial events

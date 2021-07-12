@@ -45,8 +45,7 @@ data CLI w = CLI
     gerritUser :: w ::: Text <?> "The gerrit username",
     homeserverUrl :: w ::: Text <?> "The matrix homeserver url",
     identityUrl :: w ::: Maybe Text <?> "The matrix identity url",
-    configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
-    syncClient :: w ::: Bool <?> "Sync matrix status (join rooms)"
+    configFile :: w ::: FilePath <?> "The gerritbot.dhall path"
   }
   deriving stock (Generic)
 
@@ -116,9 +115,9 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = Matr
         else " " <> changeBranch
 
 -- | Find if a channel match a change, return the roomId
-getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe RoomID
-getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
-  | serverMatch && projectMatch && branchMatch && eventMatch = Just (RoomID roomId)
+getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> (RoomID, Channel) -> Maybe RoomID
+getEventRoom GerritServer {..} eventType Gerrit.Change {..} (roomId, Channel {..})
+  | serverMatch && projectMatch && branchMatch && eventMatch = Just roomId
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
@@ -128,7 +127,7 @@ getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
     eventMatch = any (eventEquals eventType) events
 
 -- | The gerritbot callback
-onEvent :: [Channel] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
+onEvent :: [(RoomID, Channel)] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
 onEvent channels tqueue server event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
@@ -183,14 +182,15 @@ sendEvents sess idLookup events = do
       print res
 
 -- | Sync the matrix client
-doSyncClient :: ClientSession -> [Channel] -> IO ()
-doSyncClient sess = mapM_ joinRoom
+doSyncClient :: ClientSession -> [Channel] -> IO [RoomID]
+doSyncClient sess = traverse joinRoom
   where
-    joinRoom :: Channel -> IO ()
+    -- TODO: leave room that are no longer configured
+    joinRoom :: Channel -> IO RoomID
     joinRoom Channel {..} = do
-      logMsg $ "Joining room " <> show roomId
-      res <- Matrix.joinRoomById sess (Matrix.RoomID roomId)
-      print res
+      logMsg $ "Joining room " <> room
+      fromRight (error $ "Failed to join: " <> room)
+        <$> Matrix.retry (Matrix.joinRoom sess room)
 
 -- | gerritbot-matrix entrypoint
 main :: IO ()
@@ -201,6 +201,7 @@ main = do
   idTokenM <- lookupEnv "MATRIX_IDENTITY_TOKEN"
   idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
   channels <- Dhall.input auto (toText $ configFile args)
+
   -- Create http manager
   sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
   idLookup <- case (identityUrl args, idTokenM, idPepperM) of
@@ -210,11 +211,18 @@ main = do
     (Just _, _, _) ->
       error "Missing MATRIX_IDENTITY_TOKEN or MATRIX_IDENTITY_PEPPER environment"
     (Nothing, _, _) -> pure . const . pure $ Nothing
-  when (syncClient args) (doSyncClient sess channels)
+
+  -- Join rooms
+  roomIds <- doSyncClient sess channels
+  let channels' = zip roomIds channels
+
+  -- Setup queue
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
+
+  -- Go!
   Async.concurrently_
-    (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels)
+    (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels')
     (forever $ runMatrix sess (DB.get db idLookup) tqueue)
   putTextLn "Done."
   where
