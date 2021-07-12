@@ -1,5 +1,6 @@
--- | Render containerfile with: dhall text --file ./Containerfile.dhall --output Containerfile
-let base = "registry.fedoraproject.org/fedora:33"
+-- | Build the container with this command:
+-- dhall text --file ./Containerfile.dhall | TMPDIR=/tmp podman build -t gerritbot-matrix -f - .
+let base = "registry.fedoraproject.org/fedora:34"
 
 let Containerfile =
       https://raw.githubusercontent.com/softwarefactory-project/dhall-containerfile/0.3.0/package.dhall sha256:03a6e298ff140d430cea8b387fad886ce9f5bee24622c7d1102115cc08ed9cf9
@@ -39,7 +40,7 @@ let image =
       # clone-dep
           "https://softwarefactory-project.io/r/software-factory"
           "matrix-client-haskell"
-          "4c5b8c6719085edd97791306d5d7c13be3b1587b"
+          "44e9b74e00edf14ed9a15b778f750c1dfc7e4d6a"
       # Containerfile.copy
           [ "cabal.project"
           , "gerritbot-matrix.cabal"

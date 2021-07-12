@@ -13,7 +13,7 @@ Then setup the configuration by editing the `gerritbot.dhall` file.
 Run the bot with:
 
 ```ShellSession
-$ gerritbot-matrix --gerrit-host review.opendev.org --gerrit-user tristanC --matrix-url https://matrix.org --config-file ./gerritbot.dhall
+$ gerritbot-matrix --gerrit-host review.opendev.org --gerrit-user tristanC --homeserver-url https://matrix.org --config-file ./gerritbot.dhall
 ```
 
 ## Contribute
