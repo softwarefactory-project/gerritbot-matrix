@@ -4,6 +4,7 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -24,6 +25,8 @@ import Data.Digest.Pure.SHA (sha1, showDigest)
 import qualified Data.HashMap.Strict as HM
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Dhall hiding (maybe)
+import qualified Dhall.Core
+import qualified Dhall.Src
 import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
@@ -58,6 +61,10 @@ Dhall.TH.makeHaskellTypes
   [ Dhall.TH.MultipleConstructors "EventType" "(./src/Config.dhall).Event",
     Dhall.TH.SingleConstructor "Channel" "Channel" "(./src/Config.dhall).Type"
   ]
+
+-- | Embed the expected configuration schema
+configurationSchema :: Dhall.Core.Expr Dhall.Src.Src Void
+configurationSchema = $(Dhall.TH.staticDhallExpression "(./src/Config.dhall).Type")
 
 deriving instance Eq EventType
 
@@ -195,6 +202,13 @@ doSyncClient sess = traverse joinRoom
 -- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
+  -- Handle special command line
+  getArgs >>= \case
+    ["print-config-schema"] -> do
+      putTextLn $ Dhall.Core.pretty configurationSchema
+      exitSuccess
+    _anyOtherArgs -> pure ()
+
   -- Load the environment
   args <- unwrapRecord "Gerritbot Matrix"
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
