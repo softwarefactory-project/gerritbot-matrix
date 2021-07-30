@@ -1,6 +1,10 @@
 -- | Build the container with this command:
 -- dhall text --file ./Containerfile.dhall | TMPDIR=/tmp podman build -t gerritbot-matrix -f - .
-let base = "registry.fedoraproject.org/fedora:34"
+let base = \(name : Text) -> "registry.fedoraproject.org/${name}:34"
+
+let builder = base "fedora"
+
+let runtime = base "fedora-minimal"
 
 let Containerfile =
       https://raw.githubusercontent.com/softwarefactory-project/dhall-containerfile/0.3.0/package.dhall sha256:03a6e298ff140d430cea8b387fad886ce9f5bee24622c7d1102115cc08ed9cf9
@@ -24,7 +28,7 @@ let copy =
         Containerfile.copy [ "${name}/", "/build/gerritbot-matrix/${name}" ]
 
 let image =
-        Containerfile.from base
+        Containerfile.from builder
       # Containerfile.env (toMap { LANG = "C.UTF-8" })
       # Containerfile.workdir "/build/gerritbot-matrix"
       # Containerfile.run
@@ -55,13 +59,16 @@ let image =
       # copy "test"
       # Containerfile.run
           "Build gerritbot"
-          [ "cabal v2-install -v1 exe:gerritbot-matrix" ]
+          [ "cabal v2-install -O2 -v1 exe:gerritbot-matrix" ]
       # Containerfile.emptyLine
       # [ Containerfile.Statement.Comment "The final image" ]
-      # Containerfile.from base
+      # Containerfile.from runtime
       # Containerfile.run
           "Install dependencies"
-          [ "dnf update -y", "dnf install -y openssh-clients", "dnf clean all" ]
+          [ "microdnf update -y"
+          , "microdnf install -y openssh-clients"
+          , "microdnf clean all"
+          ]
       # Containerfile.copyFrom
           "0"
           [ "/root/.cabal/bin/gerritbot-matrix", "/bin" ]
