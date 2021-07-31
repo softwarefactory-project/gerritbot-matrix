@@ -13,10 +13,10 @@ import Relude
 import Test.Hspec
 
 main :: IO ()
-main = hspec spec
+main = hspec . spec . GerritServer "" "" =<< newIORef Nothing
 
-spec :: Spec
-spec = describe "unit tests" $ do
+spec :: GerritServer -> Spec
+spec server = describe "unit tests" $ do
   it "match" $ do
     glob "software-factory/*" "software-factory/gerritbot-haskell"
       `shouldBe` True
@@ -28,7 +28,7 @@ spec = describe "unit tests" $ do
         servers = ["*"]
         channel = Channel {..}
         change = fakeChange "software-factory/gerritbot-haskell" "main"
-     in getEventRoom (GerritServer "" "") Gerrit.PatchsetCreatedEvent change (RoomID "!testRoom", channel)
+     in getEventRoom server Gerrit.PatchsetCreatedEvent change (RoomID "!testRoom", channel)
           `shouldBe` Just (RoomID "!testRoom")
   it "group event" $ do
     let events =

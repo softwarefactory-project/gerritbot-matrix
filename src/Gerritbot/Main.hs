@@ -239,14 +239,18 @@ main = do
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
 
+  -- Ssh connection monitor
+  sshAliveRef <- newIORef Nothing
+  let gerritServer = Gerritbot.GerritServer (gerritHost args) (gerritUser args) sshAliveRef
+
   -- Spawn monitoring
   case monitoringPort args of
-    Just port -> void $ Async.async (Warp.run port monitoringApp)
+    Just port -> void $ Async.async (Warp.run port $ monitoringApp sshAliveRef)
     Nothing -> pure ()
 
   -- Go!
   Async.concurrently_
-    (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels')
+    (runGerrit gerritServer (onEvent channels' tqueue))
     (forever $ runMatrix sess (DB.get db idLookup) tqueue)
   putTextLn "Done."
   where
@@ -266,13 +270,16 @@ main = do
         Right (Just (Matrix.UserID x)) -> pure $ Just x
         Right Nothing -> pure Nothing
         Left e -> sayErr ("Lookup failed: " <> show e) >> pure Nothing
-    runGerrit server tqueue channels =
-      Gerritbot.runStreamClient server eventList (onEvent channels tqueue)
+    runGerrit server cb =
+      Gerritbot.runStreamClient server eventList cb
     runMatrix sess idLookup tqueue = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
       sendEvents sess idLookup events
       threadDelay 100_000
-    monitoringApp req resp = resp $ case Wai.rawPathInfo req of
-      "/health" -> Wai.responseLBS HTTP.ok200 [] mempty
-      _anyOtherPath -> Wai.responseLBS HTTP.notFound404 [] mempty
+    monitoringApp aliveRef req resp = case Wai.rawPathInfo req of
+      "/health" -> do
+        alive <- Gerritbot.isAlive aliveRef
+        let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
+        resp $ Wai.responseLBS status [] mempty
+      _anyOtherPath -> resp $ Wai.responseLBS HTTP.notFound404 [] mempty
