@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- | Utility function
@@ -11,8 +12,30 @@ import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.STM.TBMQueue (TBMQueue)
 import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
 import Data.Time.Clock (getCurrentTime)
+import Prometheus (Counter)
+import qualified Prometheus
 import Relude
 import Say
+
+data MetricEvent = SshRecon | GerritEventReceived | MatrixMessageSent
+
+logMetrics :: Metrics -> MetricEvent -> IO ()
+logMetrics Metrics {..} ev = case ev of
+  SshRecon -> Prometheus.incCounter sshRecon
+  GerritEventReceived -> Prometheus.incCounter gerritEvents
+  MatrixMessageSent -> Prometheus.incCounter matrixMessages
+
+data Metrics = Metrics {sshRecon :: Counter, gerritEvents :: Counter, matrixMessages :: Counter}
+
+registerMetrics :: IO Metrics
+registerMetrics =
+  Metrics
+    <$> mkCounter "gerrit_errors" "Gerrit reconnection attempts"
+    <*> mkCounter "gerrit_events" "Gerrit events received"
+    <*> mkCounter "matrix_messages" "Matrix messages sent"
+  where
+    mkCounter name desc =
+      Prometheus.register $ Prometheus.counter (Prometheus.Info name desc)
 
 -- | Globing
 -- >>> glob "" ""

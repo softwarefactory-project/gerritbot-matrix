@@ -40,6 +40,7 @@ import qualified Network.Matrix.Identity as Matrix
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import Options.Generic
+import qualified Prometheus
 import Relude
 import Relude.Extra.Group (groupBy)
 import Say (sayErr)
@@ -169,8 +170,17 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
     groupRoomEvents = fmap toList . HM.elems . groupBy meRoomId
 
 -- | The matrix client
-sendEvents :: ClientSession -> (Text -> IO (Maybe Text)) -> [MatrixEvent] -> IO ()
-sendEvents sess idLookup events = do
+sendEvents ::
+  -- | The matrix client session
+  ClientSession ->
+  -- | A function to lookup identity
+  (Text -> IO (Maybe Text)) ->
+  -- | A list of event to proces
+  [MatrixEvent] ->
+  -- | The logMetric callback
+  (MetricEvent -> IO ()) ->
+  IO ()
+sendEvents sess idLookup events logMetric = do
   logMsg $ "Sending events " <> show events
   mapM_ send (groupEvents events)
   where
@@ -190,6 +200,7 @@ sendEvents sess idLookup events = do
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
           roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
       res <- Matrix.retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
+      logMetric MatrixMessageSent
       print res
 
 -- | Sync the matrix client
@@ -244,14 +255,16 @@ main = do
   let gerritServer = Gerritbot.GerritServer (gerritHost args) (gerritUser args) sshAliveRef
 
   -- Spawn monitoring
-  case monitoringPort args of
-    Just port -> void $ Async.async (Warp.run port $ monitoringApp sshAliveRef)
-    Nothing -> pure ()
+  logMetric <- case monitoringPort args of
+    Just port -> do
+      void $ Async.async (Warp.run port $ monitoringApp sshAliveRef)
+      logMetrics <$> registerMetrics
+    Nothing -> pure $ const $ pure ()
 
   -- Go!
   Async.concurrently_
-    (runGerrit gerritServer (onEvent channels' tqueue))
-    (forever $ runMatrix sess (DB.get db idLookup) tqueue)
+    (runGerrit gerritServer (onEvent channels' tqueue) logMetric)
+    (forever $ runMatrix sess (DB.get db idLookup) tqueue logMetric)
   putTextLn "Done."
   where
     -- TODO: infer subscribe list from channels configuration
@@ -262,6 +275,7 @@ main = do
         Gerrit.ChangeRestoredEvent,
         Gerrit.PatchsetCreatedEvent
       ]
+
     -- TODO: fetch from server
     hashDetails = Matrix.HashDetails ("sha256" :| []) . toText
     mkIdLookup idSess hd email = do
@@ -270,16 +284,22 @@ main = do
         Right (Just (Matrix.UserID x)) -> pure $ Just x
         Right Nothing -> pure Nothing
         Left e -> sayErr ("Lookup failed: " <> show e) >> pure Nothing
+
     runGerrit server cb =
       Gerritbot.runStreamClient server eventList cb
-    runMatrix sess idLookup tqueue = do
+
+    runMatrix sess idLookup tqueue logMetric = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
-      sendEvents sess idLookup events
+      sendEvents sess idLookup events logMetric
       threadDelay 100_000
+
     monitoringApp aliveRef req resp = case Wai.rawPathInfo req of
       "/health" -> do
         alive <- Gerritbot.isAlive aliveRef
         let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
         resp $ Wai.responseLBS status [] mempty
+      "/metrics" -> do
+        metrics <- Prometheus.exportMetricsAsText
+        resp $ Wai.responseLBS HTTP.ok200 [] metrics
       _anyOtherPath -> resp $ Wai.responseLBS HTTP.notFound404 [] mempty
