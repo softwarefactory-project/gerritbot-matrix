@@ -41,6 +41,7 @@ library
                     , foldl
                     , gerrit
                     , hashtables
+                    , http-types
                     , matrix-client
                     , optparse-generic       ^>= 1.4
                     , relude >= 1.0
@@ -50,6 +51,8 @@ library
                     , time
                     , text                   ^>= 1.2
                     , turtle
+                    , wai                    ^>= 3.2
+                    , warp                   ^>= 3.3
     hs-source-dirs:   src/
 
 executable gerritbot-matrix

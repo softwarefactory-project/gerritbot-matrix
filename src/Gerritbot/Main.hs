@@ -24,7 +24,7 @@ import Data.Bits ((.|.))
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import qualified Data.HashMap.Strict as HM
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
-import Dhall hiding (maybe)
+import Dhall hiding (maybe, void)
 import qualified Dhall.Core
 import qualified Dhall.Src
 import qualified Dhall.TH
@@ -33,9 +33,12 @@ import Gerritbot (GerritServer (..))
 import qualified Gerritbot
 import qualified Gerritbot.Database as DB
 import Gerritbot.Utils
+import qualified Network.HTTP.Types.Status as HTTP
 import Network.Matrix.Client (ClientSession, MatrixToken (..), RoomID (..))
 import qualified Network.Matrix.Client as Matrix
 import qualified Network.Matrix.Identity as Matrix
+import qualified Network.Wai as Wai
+import qualified Network.Wai.Handler.Warp as Warp
 import Options.Generic
 import Relude
 import Relude.Extra.Group (groupBy)
@@ -48,7 +51,8 @@ data CLI w = CLI
     gerritUser :: w ::: Text <?> "The gerrit username",
     homeserverUrl :: w ::: Text <?> "The matrix homeserver url",
     identityUrl :: w ::: Maybe Text <?> "The matrix identity url",
-    configFile :: w ::: FilePath <?> "The gerritbot.dhall path"
+    configFile :: w ::: FilePath <?> "The gerritbot.dhall path",
+    monitoringPort :: w ::: Maybe Int <?> "HTTP listening port"
   }
   deriving stock (Generic)
 
@@ -235,6 +239,11 @@ main = do
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
 
+  -- Spawn monitoring
+  case monitoringPort args of
+    Just port -> void $ Async.async (Warp.run port monitoringApp)
+    Nothing -> pure ()
+
   -- Go!
   Async.concurrently_
     (runGerrit (Gerritbot.GerritServer (gerritHost args) (gerritUser args)) tqueue channels')
@@ -264,3 +273,6 @@ main = do
       events <- bufferQueueRead 5_000_000 tqueue
       sendEvents sess idLookup events
       threadDelay 100_000
+    monitoringApp req resp = resp $ case Wai.rawPathInfo req of
+      "/health" -> Wai.responseLBS HTTP.ok200 [] mempty
+      _anyOtherPath -> Wai.responseLBS HTTP.notFound404 [] mempty
