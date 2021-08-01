@@ -18,21 +18,28 @@ import Prometheus.Metric.GHC (ghcMetrics)
 import Relude
 import Say
 
-data MetricEvent = SshRecon | GerritEventReceived | MatrixMessageSent
+data MetricEvent = SshRecon | HttpRetry | GerritEventReceived | MatrixMessageSent
 
 logMetrics :: Metrics -> MetricEvent -> IO ()
 logMetrics Metrics {..} ev = case ev of
   SshRecon -> Prometheus.incCounter sshRecon
+  HttpRetry -> Prometheus.incCounter httpRetry
   GerritEventReceived -> Prometheus.incCounter gerritEvents
   MatrixMessageSent -> Prometheus.incCounter matrixMessages
 
-data Metrics = Metrics {sshRecon :: Counter, gerritEvents :: Counter, matrixMessages :: Counter}
+data Metrics = Metrics
+  { sshRecon :: Counter,
+    httpRetry :: Counter,
+    gerritEvents :: Counter,
+    matrixMessages :: Counter
+  }
 
 registerMetrics :: IO Metrics
 registerMetrics = do
   Prometheus.register ghcMetrics
   Metrics
     <$> mkCounter "gerrit_errors" "Gerrit reconnection attempts"
+    <*> mkCounter "http_errors" "Http connection errors"
     <*> mkCounter "gerrit_events" "Gerrit events received"
     <*> mkCounter "matrix_messages" "Matrix messages sent"
   where

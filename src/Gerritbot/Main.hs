@@ -61,6 +61,8 @@ data CLI w = CLI
 instance ParseRecord (CLI Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
 
+type RetryIO a = Matrix.MatrixIO a -> Matrix.MatrixIO a
+
 -- | Generate Haskell Type from Dhall Type
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
 Dhall.TH.makeHaskellTypes
@@ -175,6 +177,7 @@ groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents 
 sendEvents ::
   -- | The matrix client session
   ClientSession ->
+  RetryIO Matrix.EventID ->
   -- | A function to lookup identity
   (Text -> IO (Maybe Text)) ->
   -- | A list of event to proces
@@ -182,7 +185,7 @@ sendEvents ::
   -- | The logMetric callback
   (MetricEvent -> IO ()) ->
   IO ()
-sendEvents sess idLookup events logMetric = do
+sendEvents sess retry idLookup events logMetric = do
   logMsg $ "Sending events " <> show events
   mapM_ send (groupEvents events)
   where
@@ -201,24 +204,24 @@ sendEvents sess idLookup events logMetric = do
           mtFormattedBody = Just $ renderHtml messageDoc
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
           roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
-      res <- Matrix.retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
+      res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
       logMetric MatrixMessageSent
       print res
 
 -- | Sync the matrix client
-doSyncClient :: ClientSession -> [Channel] -> IO [RoomID]
-doSyncClient sess = traverse joinRoom
+doSyncClient :: ClientSession -> RetryIO RoomID -> [Channel] -> IO [RoomID]
+doSyncClient sess retry = traverse joinRoom
   where
     -- TODO: leave room that are no longer configured
     joinRoom :: Channel -> IO RoomID
     joinRoom Channel {..} = do
       logMsg $ "Joining room " <> room
       eitherToError ("Failed to join " <> room)
-        <$> Matrix.retry (Matrix.joinRoom sess room)
+        <$> retry (Matrix.joinRoom sess room)
 
 -- | Creates an IO action that auto reload the config file if it changed
-reloadConfig :: ClientSession -> FilePath -> IO (IO [(RoomID, Channel)])
-reloadConfig sess fp = do
+reloadConfig :: ClientSession -> RetryIO RoomID -> FilePath -> IO (IO [(RoomID, Channel)])
+reloadConfig sess retry fp = do
   -- Get the current config
   configTS <- getModificationTime fp
   config <- load
@@ -240,7 +243,7 @@ reloadConfig sess fp = do
 
     load = do
       channels <- Dhall.input auto (toText fp)
-      roomIds <- doSyncClient sess channels
+      roomIds <- doSyncClient sess retry channels
       putTextLn $ "Joined: " <> show roomIds
       -- TODO: get all joined room and leave unknown room
       pure $ zip roomIds channels
@@ -271,9 +274,6 @@ main = do
       error "Missing MATRIX_IDENTITY_TOKEN or MATRIX_IDENTITY_PEPPER environment"
     (Nothing, _, _) -> pure . const . pure $ Nothing
 
-  -- Load the config
-  config <- reloadConfig sess (configFile args)
-
   -- Setup queue
   db <- DB.new
   tqueue <- newTBMQueueIO 2048
@@ -289,10 +289,19 @@ main = do
       logMetrics <$> registerMetrics
     Nothing -> pure $ const $ pure ()
 
+  -- Network monitoring
+  let logRetry err = do
+        logMsg err
+        logMetric HttpRetry
+      retry = Matrix.retryWithLog 7 logRetry
+
+  -- Load the config
+  config <- reloadConfig sess retry (configFile args)
+
   -- Go!
   Async.concurrently_
     (runGerrit gerritServer (onEvent config tqueue) logMetric)
-    (forever $ runMatrix sess (DB.get db idLookup) tqueue logMetric)
+    (forever $ runMatrix sess retry (DB.get db idLookup) tqueue logMetric)
   putTextLn "Done."
   where
     -- TODO: infer subscribe list from channels configuration
@@ -316,10 +325,10 @@ main = do
     runGerrit server cb =
       Gerritbot.runStreamClient server eventList cb
 
-    runMatrix sess idLookup tqueue logMetric = do
+    runMatrix sess retry idLookup tqueue logMetric = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
-      sendEvents sess idLookup events logMetric
+      sendEvents sess retry idLookup events logMetric
       threadDelay 100_000
 
     monitoringApp aliveRef req resp = case Wai.rawPathInfo req of
