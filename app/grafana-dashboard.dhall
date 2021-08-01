@@ -57,8 +57,8 @@ let panels =
       , panel
           8
           "Health"
-          [ counter "A" "gerrit_errors" "Gerrit connection errors"
-          , counter "B" "matrix_errors" "Matrix post failures"
+          [ counter "A" "ssh_errors" "Gerrit connection errors"
+          , counter "B" "http_errors" "Matrix post failures"
           ]
       , panel
           16

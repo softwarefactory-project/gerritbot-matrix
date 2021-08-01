@@ -36,9 +36,9 @@ data Metrics = Metrics
 
 registerMetrics :: IO Metrics
 registerMetrics = do
-  Prometheus.register ghcMetrics
+  void $ Prometheus.register ghcMetrics
   Metrics
-    <$> mkCounter "gerrit_errors" "Gerrit reconnection attempts"
+    <$> mkCounter "ssh_errors" "Gerrit reconnection attempts"
     <*> mkCounter "http_errors" "Http connection errors"
     <*> mkCounter "gerrit_events" "Gerrit events received"
     <*> mkCounter "matrix_messages" "Matrix messages sent"
