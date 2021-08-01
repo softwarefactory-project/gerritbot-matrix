@@ -1,0 +1,76 @@
+{
+  "nodes": {
+    "flake-utils": {
+      "locked": {
+        "lastModified": 1623875721,
+        "narHash": "sha256-A8BU7bjS5GirpAUv4QA+QnJ4CceLHkcXdRp4xITDB0s=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "f7e004a55b120c02ecb6219596820fcd32ca8772",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "gerrit": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1625003868,
+        "narHash": "sha256-7ndasmdlY0qHXwc0ec3QjJWt63Wb8WZyFZJbnFdPqas=",
+        "owner": "softwarefactory-project",
+        "repo": "gerrit-haskell",
+        "rev": "1f13d97eb96956681fdedff2b2ee2ce93ed16746",
+        "type": "github"
+      },
+      "original": {
+        "owner": "softwarefactory-project",
+        "repo": "gerrit-haskell",
+        "type": "github"
+      }
+    },
+    "matrix-client": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1627838238,
+        "narHash": "sha256-vpT72mOppGO8HGqDpJ7P5hKxxUjQfJoKHMcag2WDa0A=",
+        "owner": "softwarefactory-project",
+        "repo": "matrix-client-haskell",
+        "rev": "af8c03117a10e36ebbd5d5d596f58c08e39d4121",
+        "type": "github"
+      },
+      "original": {
+        "owner": "softwarefactory-project",
+        "repo": "matrix-client-haskell",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1627838283,
+        "narHash": "sha256-YgxKXnyVltURwVPT+eIHPIgTaCb/1MrvebOmEHw2FBU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "9fc2cddf24ad1819f17174cbae47789294ea6dc4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "gerrit": "gerrit",
+        "matrix-client": "matrix-client",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
