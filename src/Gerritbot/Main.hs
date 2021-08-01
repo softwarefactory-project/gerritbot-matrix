@@ -44,6 +44,7 @@ import qualified Prometheus
 import Relude
 import Relude.Extra.Group (groupBy)
 import Say (sayErr)
+import System.Directory (getModificationTime)
 
 -- | Command line interface
 -- See: http://hackage.haskell.org/package/optparse-generic-1.4.4/docs/Options-Generic.html
@@ -139,10 +140,11 @@ getEventRoom GerritServer {..} eventType Gerrit.Change {..} (roomId, Channel {..
     eventMatch = any (eventEquals eventType) events
 
 -- | The gerritbot callback
-onEvent :: [(RoomID, Channel)] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
-onEvent channels tqueue server event =
+onEvent :: IO [(RoomID, Channel)] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
+onEvent config tqueue server event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
+      channels <- config
       now <- getSystemTime
       putTextLn $ "Processing " <> show event
       case mapMaybe (getEventRoom server (Gerrit.getEventType event) change) channels of
@@ -214,6 +216,35 @@ doSyncClient sess = traverse joinRoom
       eitherToError ("Failed to join " <> room)
         <$> Matrix.retry (Matrix.joinRoom sess room)
 
+-- | Creates an IO action that auto reload the config file if it changed
+reloadConfig :: ClientSession -> FilePath -> IO (IO [(RoomID, Channel)])
+reloadConfig sess fp = do
+  -- Get the current config
+  configTS <- getModificationTime fp
+  config <- load
+
+  -- Create the reload action
+  tsRef <- newIORef (configTS, config)
+  pure (reload tsRef)
+  where
+    reload tsRef = do
+      (prevConfigTS, prevConfig) <- readIORef tsRef
+      configTS <- getModificationTime fp
+      if configTS > prevConfigTS
+        then do
+          putTextLn $ toText fp <> ": reloading config"
+          config <- load
+          writeIORef tsRef (configTS, config)
+          pure config
+        else pure prevConfig
+
+    load = do
+      channels <- Dhall.input auto (toText fp)
+      roomIds <- doSyncClient sess channels
+      putTextLn $ "Joined: " <> show roomIds
+      -- TODO: get all joined room and leave unknown room
+      pure $ zip roomIds channels
+
 -- | gerritbot-matrix entrypoint
 main :: IO ()
 main = do
@@ -229,7 +260,6 @@ main = do
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
   idTokenM <- lookupEnv "MATRIX_IDENTITY_TOKEN"
   idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
-  channels <- Dhall.input auto (toText $ configFile args)
 
   -- Create http manager
   sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
@@ -241,10 +271,8 @@ main = do
       error "Missing MATRIX_IDENTITY_TOKEN or MATRIX_IDENTITY_PEPPER environment"
     (Nothing, _, _) -> pure . const . pure $ Nothing
 
-  -- Join rooms
-  roomIds <- doSyncClient sess channels
-  putTextLn $ "Joined: " <> show roomIds
-  let channels' = zip roomIds channels
+  -- Load the config
+  config <- reloadConfig sess (configFile args)
 
   -- Setup queue
   db <- DB.new
@@ -263,7 +291,7 @@ main = do
 
   -- Go!
   Async.concurrently_
-    (runGerrit gerritServer (onEvent channels' tqueue) logMetric)
+    (runGerrit gerritServer (onEvent config tqueue) logMetric)
     (forever $ runMatrix sess (DB.get db idLookup) tqueue logMetric)
   putTextLn "Done."
   where
