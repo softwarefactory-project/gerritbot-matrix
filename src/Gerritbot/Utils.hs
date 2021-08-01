@@ -14,6 +14,7 @@ import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
 import Data.Time.Clock (getCurrentTime)
 import Prometheus (Counter)
 import qualified Prometheus
+import Prometheus.Metric.GHC (ghcMetrics)
 import Relude
 import Say
 
@@ -28,7 +29,8 @@ logMetrics Metrics {..} ev = case ev of
 data Metrics = Metrics {sshRecon :: Counter, gerritEvents :: Counter, matrixMessages :: Counter}
 
 registerMetrics :: IO Metrics
-registerMetrics =
+registerMetrics = do
+  Prometheus.register ghcMetrics
   Metrics
     <$> mkCounter "gerrit_errors" "Gerrit reconnection attempts"
     <*> mkCounter "gerrit_events" "Gerrit events received"

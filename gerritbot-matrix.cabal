@@ -46,6 +46,7 @@ library
                     , matrix-client
                     , optparse-generic       ^>= 1.4
                     , prometheus-client      ^>= 1.0
+                    , prometheus-metrics-ghc ^>= 1.0
                     , relude >= 1.0
                     , retry
                     , say
@@ -65,6 +66,7 @@ executable gerritbot-matrix
     ghc-options:      -threaded
                       -rtsopts
                       -with-rtsopts=-N
+                      -with-rtsopts=-T
 
 test-suite unit
   import:             common-options

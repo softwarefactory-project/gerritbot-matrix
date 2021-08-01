@@ -22,31 +22,53 @@ let counter =
           , legendFormat = Some "${title} {{ job }}"
           }
 
+let gauge =
+      \(refId : Text) ->
+      \(expr : Text) ->
+      \(title : Text) ->
+        Grafana.MetricsTargets.PrometheusTarget
+          Grafana.PrometheusTarget::{
+          , refId
+          , expr
+          , legendFormat = Some "${title} {{ job }}"
+          }
+
+let panel =
+      \(y : Natural) ->
+      \(title : Text) ->
+      \(targets : List Grafana.MetricsTargets) ->
+        Grafana.Panels.mkGraphPanel
+          Grafana.GraphPanel::{
+          , title
+          , gridPos = { x = 0, y, w = 24, h = 6 }
+          , datasource
+          , targets
+          , fill = 0
+          , linewidth = 2
+          }
+
 let panels =
-      [ Grafana.Panels.mkGraphPanel
-          Grafana.GraphPanel::{
-          , title = "Activity"
-          , gridPos = { x = 0, y = 0, w = 24, h = 6 }
-          , datasource
-          , targets =
-            [ counter "A" "gerrit_events" "Gerrit events received"
-            , counter "B" "matrix_messages" "Matrix messages sent"
-            ]
-          , fill = 0
-          , linewidth = 2
-          }
-      , Grafana.Panels.mkGraphPanel
-          Grafana.GraphPanel::{
-          , title = "Health"
-          , gridPos = { x = 0, y = 0, w = 24, h = 6 }
-          , datasource
-          , targets =
-            [ counter "A" "gerrit_errors" "Gerrit connection errors"
-            , counter "B" "matrix_errors" "Matrix post failures"
-            ]
-          , fill = 0
-          , linewidth = 2
-          }
+      [ panel
+          0
+          "Activity"
+          [ counter "A" "gerrit_events" "Gerrit events received"
+          , counter "B" "matrix_messages" "Matrix messages sent"
+          ]
+      , panel
+          8
+          "Health"
+          [ counter "A" "gerrit_errors" "Gerrit connection errors"
+          , counter "B" "matrix_errors" "Matrix post failures"
+          ]
+      , panel
+          16
+          "Memory"
+          [ gauge
+              "A"
+              "ghc_gcdetails_live_bytes"
+              "Total amount of live data in the heap."
+          ]
+      , panel 24 "CPU" [ counter "B" "ghc_cpu_seconds_total" "CPU time" ]
       ]
 
 in  Grafana.Dashboard::{
