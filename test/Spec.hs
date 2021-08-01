@@ -34,21 +34,22 @@ spec server = describe "unit tests" $ do
     let events =
           [ -- Sequencial events
             MatrixEvent action1 object1 room1 0,
-            MatrixEvent action1 object2 room1 0,
+            MatrixEvent action1 object3 room1 10,
             -- Interleaved events
-            MatrixEvent action2 object1 room2 0,
-            MatrixEvent action2 object1 room1 0,
-            MatrixEvent action2 object2 room2 0,
-            MatrixEvent action2 object2 room1 0,
+            MatrixEvent action2 object1 room2 2,
+            MatrixEvent action2 object1 room1 3,
+            MatrixEvent action2 object2 room2 4,
+            MatrixEvent action2 object2 room1 5,
             -- Out of order
-            MatrixEvent action3 object2 room1 0,
-            MatrixEvent action3 object1 room1 0
+            MatrixEvent action3 object2 room1 7,
+            MatrixEvent action3 object1 room1 6,
+            MatrixEvent action1 object2 room1 1
           ]
      in groupEvents events
-          `shouldBe` [ (room1, action1, 0, [object1, object2]),
-                       (room1, action2, 0, [object1, object2]),
-                       (room1, action3, 0, [object2, object1]),
-                       (room2, action2, 0, [object1, object2])
+          `shouldBe` [ MatrixMessage room1 action1 (object1 :| [object2, object3]) 11 0,
+                       MatrixMessage room2 action2 (object1 :| [object2]) 6 2,
+                       MatrixMessage room1 action2 (object1 :| [object2]) 7 3,
+                       MatrixMessage room1 action3 (object1 :| [object2]) 7 6
                      ]
   it "format oneline" $ do
     renderText (formatMessages action1 [object1])
@@ -68,8 +69,11 @@ spec server = describe "unit tests" $ do
         EventAction "" Nothing "foo merge:",
         EventAction "" Nothing "bar do:"
       )
-    (object1, object2) =
-      (EventObject $ DocBody ["change1 ", DocLink "localhost" "title"], EventObject "change2")
+    (object1, object2, object3) =
+      ( EventObject $ DocBody ["change1 ", DocLink "localhost" "title"],
+        EventObject "change2",
+        EventObject "change3"
+      )
     (room1, room2) =
       (RoomID "room1", RoomID "room2")
     formatMessages (EventAction _ _ action) objects =

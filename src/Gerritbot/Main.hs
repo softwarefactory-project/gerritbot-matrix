@@ -23,6 +23,7 @@ import Control.Concurrent.STM.TBMQueue (TBMQueue, newTBMQueueIO, writeTBMQueue)
 import Data.Bits ((.|.))
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import qualified Data.HashMap.Strict as HM
+import qualified Data.List.NonEmpty as NE
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Dhall hiding (maybe, void)
 import qualified Dhall.Core
@@ -159,14 +160,35 @@ onEvent config tqueue server event =
     queueMessage mkMatrixEvent roomId = do
       atomically $ writeTBMQueue tqueue (mkMatrixEvent roomId)
 
+data MatrixMessage = MatrixMessage
+  { mmRoomID :: RoomID,
+    mmEventAction :: EventAction,
+    mmObjects :: NonEmpty EventObject,
+    mmTS :: Int64,
+    mmOldest :: Int64
+  }
+  deriving (Eq, Show)
+
 -- | Group events by room id and author
 -- See: https://hackage.haskell.org/package/relude-1.0.0.1/docs/Relude-Extra-Group.html#v:groupBy
-groupEvents :: [MatrixEvent] -> [(RoomID, EventAction, Int64, [EventObject])]
-groupEvents events = fmap toGroup $ concat $ groupUserEvent <$> groupRoomEvents events
+groupEvents :: [MatrixEvent] -> [MatrixMessage]
+groupEvents events =
+  sortOn mmOldest $ fmap toMessage $ concat $ groupUserEvent <$> groupRoomEvents events
   where
-    toGroup :: NonEmpty MatrixEvent -> (RoomID, EventAction, Int64, [EventObject])
-    toGroup (x :| xs) = (meRoomId x, meAction x, mkTransactionId (x : xs), fmap meObject (x : xs))
-    mkTransactionId :: [MatrixEvent] -> Int64
+    toMessage :: NonEmpty MatrixEvent -> MatrixMessage
+    toMessage xs' =
+      -- groupBy may have changed the order, thus we need to re-sort by the initial gerrit event timestamp.
+      let xs = NE.sortWith meTime xs'
+          (x :| _) = xs
+          mmRoomID = meRoomId x
+          mmEventAction = meAction x
+          mmObjects = meObject <$> xs
+          mmTS = mkTransactionId xs
+          -- We also keep track of the oldest event for a given room so that message group can be sent in order.
+          mmOldest = meTime x
+       in MatrixMessage {..}
+    --      (meRoomId x, meAction x, mkTransactionId (x : xs), fmap meObject (x : xs))
+    mkTransactionId :: NonEmpty MatrixEvent -> Int64
     mkTransactionId = foldr (.|.) 0 . fmap meTime
     groupUserEvent :: [MatrixEvent] -> [NonEmpty MatrixEvent]
     groupUserEvent = HM.elems . groupBy meAction
@@ -187,10 +209,11 @@ sendEvents ::
   IO ()
 sendEvents sess retry idLookup events logMetric = do
   logMsg $ "Sending events " <> show events
-  mapM_ send (groupEvents events)
+  traverse_ send (groupEvents events)
   where
-    send :: (RoomID, EventAction, Int64, [EventObject]) -> IO ()
-    send (roomID, EventAction {..}, ts, messages) = do
+    send :: MatrixMessage -> IO ()
+    send (MatrixMessage roomID EventAction {..} messages ts _) = do
+      -- Try to lookup matrix identity
       authorDoc <- case eaAuthorMail of
         Just mail -> do
           userIdM <- idLookup mail
@@ -198,12 +221,16 @@ sendEvents sess retry idLookup events logMetric = do
             Just userId -> DocLink ("https://matrix.to/#/" <> userId) eaAuthor
             Nothing -> DocText eaAuthor
         Nothing -> pure $ DocText eaAuthor
-      let messageDoc = DocBody [authorDoc, eaAction, DocList $ fmap unObject messages]
+
+      -- Format the room message
+      let messageDoc = DocBody [authorDoc, eaAction, DocList . toList $ fmap unObject messages]
           mtBody = renderText messageDoc
           mtFormat = Just "org.matrix.custom.html"
           mtFormattedBody = Just $ renderHtml messageDoc
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
           roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
+
+      -- Send the message
       res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
       logMetric MatrixMessageSent
       print res
