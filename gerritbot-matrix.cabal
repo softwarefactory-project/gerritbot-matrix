@@ -41,6 +41,7 @@ library
                     , gerrit
                     , hashtables
                     , http-types
+                    , http-client
                     , libssh2                ^>= 0.2
                     , matrix-client
                     , optparse-generic       ^>= 1.4

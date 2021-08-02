@@ -67,7 +67,7 @@
         defaultExe = pkgs.haskell.lib.justStaticExecutables defaultPackage;
         defaultContainerImage = pkgs.dockerTools.buildLayeredImage {
           name = "gerritbot-matrix";
-          contents = [ defaultExe pkgs.curl pkgs.cacert ];
+          contents = [ defaultExe pkgs.cacert ];
           config = {
             Entrypoint = [ "gerritbot-matrix" ];
             Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" "HOME=/root" ];

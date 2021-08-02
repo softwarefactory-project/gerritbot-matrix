@@ -33,6 +33,7 @@ import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import qualified Gerritbot
 import Gerritbot.Utils
+import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Types.Status as HTTP
 import Network.Matrix.Client (ClientSession, MatrixToken (..), RoomID (..))
 import qualified Network.Matrix.Client as Matrix
@@ -281,6 +282,12 @@ main = do
   getArgs >>= \case
     ["print-config-schema"] -> do
       putTextLn $ Dhall.Core.pretty configurationSchema
+      exitSuccess
+    ["check", port] -> do
+      manager <- HTTP.newManager HTTP.defaultManagerSettings
+      request <- HTTP.parseUrlThrow $ "http://127.0.0.1:" <> port <> "/health"
+      void $ HTTP.httpLbs request manager
+      putTextLn "Success!"
       exitSuccess
     _anyOtherArgs -> pure ()
 
