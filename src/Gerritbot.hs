@@ -1,48 +1,35 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 
 -- | A gerrit stream client
-module Gerritbot (GerritServer (..), runStreamClient, isAlive) where
+module Gerritbot (GerritServer (..), runStreamClient) where
 
-import qualified Control.Foldl as Fold
+import Control.Exception.Base (IOException)
 import Control.Monad.Catch (Handler (..))
+import Control.Monad.Trans.Except (throwE)
 import qualified Control.Retry as Retry
 import qualified Data.Aeson as Aeson
-import Data.Text.IO (hPutStrLn)
-import Data.Time.Clock.System (SystemTime (..), getSystemTime)
+import qualified Data.ByteString as BS
 import Gerrit.Event (Event, EventType, eventName)
-import Gerritbot.Utils (MetricEvent (..))
+import Gerritbot.Utils (MetricEvent (..), logErr, logMsg)
+import qualified Network.SSH.Client.LibSSH2 as SSH
+import qualified Network.SSH.Client.LibSSH2.Errors as SSH
+import qualified Network.SSH.Client.LibSSH2.Foreign as SSH
 import Relude
-import qualified Turtle
+import System.Environment (getEnv)
 
 err :: Text -> IO ()
-err = hPutStrLn stderr . mappend "[E] "
+err = logErr . mappend "[E] "
 
 data GerritServer = GerritServer
   { host :: Text,
+    port :: Int,
     username :: Text,
-    -- | aliveRef contains a timestamp after which the connection is considered alive
-    aliveRef :: IORef (Maybe Int64)
+    aliveRef :: IORef Bool
   }
-
-resetAliveRef :: IORef (Maybe Int64) -> IO ()
-resetAliveRef ref = do
-  MkSystemTime now _ <- getSystemTime
-  writeIORef ref (Just $ now + 2 + reconnectionDelay + connectionTimeout)
-
-isAlive :: IORef (Maybe Int64) -> IO Bool
-isAlive ref = do
-  tsM <- readIORef ref
-  case tsM of
-    Nothing -> pure False
-    Just ts -> do
-      MkSystemTime now _ <- getSystemTime
-      pure $ now > ts
-
-reconnectionDelay, connectionTimeout :: Int64
-reconnectionDelay = 1
-connectionTimeout = 5
 
 -- | 'runStreamClient' connects to a GerritServer with ssh and run the callback for each events.
 runStreamClient ::
@@ -51,34 +38,83 @@ runStreamClient ::
   (GerritServer -> Event -> IO ()) ->
   (MetricEvent -> IO ()) ->
   IO ()
-runStreamClient gerritServer subscribeList cb logMetric = loop
+runStreamClient server@GerritServer {..} subscribeList cb logMetric = void loop
   where
-    -- Recover from exception and reconnect after 1 second
-    delayNano = fromInteger $ toInteger $ reconnectionDelay * 1_000_000
-    loop = Retry.recovering (Retry.constantDelay delayNano) [\_ -> Handler handler] (const run)
-
-    -- Handle client exit
-    handler :: Turtle.ExitCode -> IO Bool
-    handler code = do
-      err $ "stream " <> show code
-      logMetric SshRecon
-      pure True
-
-    -- Decode the event and callback
-    onEvent evTxt = do
+    -- Decode a single event and callback
+    onEvent ev = do
       logMetric GerritEventReceived
-      case Aeson.decode $ encodeUtf8 evTxt of
-        Just v -> cb gerritServer v
-        Nothing -> err $ "Could not decode: " <> evTxt
+      case Aeson.decodeStrict ev of
+        Just v -> cb server v
+        Nothing -> err $ "Could not decode: " <> decodeUtf8 ev
 
-    run = do
-      resetAliveRef (aliveRef gerritServer)
-      Turtle.foldIO sshProc (Fold.mapM_ (onEvent . Turtle.lineToText))
+    -- Process the events received
+    onEvents = \case
+      [] -> throwE "No events"
+      -- The last event is not completed and we need to accumulate more data before processing.
+      [x] -> pure x
+      (x : xs) -> liftIO (onEvent x) >> onEvents xs
+
+    -- Channel reading loop
+    go ch acc = do
+      eof <- liftIO $ SSH.channelIsEOF ch
+      when eof $ do
+        ret <- liftIO $ SSH.channelExitStatus ch
+        throwE $ "Gerrit process exited: " <> show ret
+
+      buf <- liftIO $ SSH.readChannel ch 1024
+      when (BS.null buf) $
+        throwE $ "Empty gerrit response, remaining " <> show acc
+
+      let newLine = 10
+      go ch =<< onEvents (BS.split newLine $ acc <> buf)
+
+    -- Create the process and start the reading loop
+    runChannel ch = do
+      writeIORef aliveRef True
+      logMsg "Reading gerrit events stream..."
+      SSH.channelExecute ch (toString $ unwords command)
+
+      res <- runExceptT $ go ch ""
+      case res of
+        Left e -> err e
+        Right () -> err "Stream silently failed"
+
+      buf <- SSH.readChannelStderr ch 4096
+      fail $
+        if BS.null buf
+          then "Empty error received"
+          else "Gerrit error: " <> decodeUtf8 buf
 
     command = ["gerrit", "stream-events"] <> concatMap (\e -> ["-s", eventName e]) subscribeList
-    sshCommand =
-      ["-p", "29418"]
-        <> ["-o", "ConnectTimeout=" <> show connectionTimeout]
-        <> ["-l", username gerritServer, host gerritServer]
-        <> command
-    sshProc = Turtle.inproc "ssh" sshCommand (pure mempty)
+
+    -- Connect to the server
+    connect = do
+      home <- getEnv "HOME"
+      let known_hosts = home <> "/.ssh/known_hosts"
+          public = home <> "/.ssh/id_rsa.pub"
+          private = home <> "/.ssh/id_rsa"
+      logMsg $ "Connecting to " <> host <> ":" <> show port
+      SSH.withSSH2
+        known_hosts
+        public
+        private
+        ""
+        (toString username)
+        (toString host)
+        port
+        (`SSH.withChannel` runChannel)
+
+    -- Catch exception and retry after 1 second
+    loop = Retry.recovering (Retry.constantDelay 1_000_000) handlers (const connect)
+    handlers = [\_ -> Handler handlerSSH, \_ -> Handler handlerNetwork]
+
+    -- Handle client exception
+    handle inf e = do
+      err $ inf <> " error: " <> show e
+      writeIORef aliveRef True
+      logMetric SshRecon
+      pure True
+    handlerSSH :: SSH.ErrorCode -> IO Bool
+    handlerSSH code = handle "ssh" code
+    handlerNetwork :: IOException -> IO Bool
+    handlerNetwork exc = handle "network" exc

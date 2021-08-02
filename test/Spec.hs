@@ -13,7 +13,7 @@ import Relude
 import Test.Hspec
 
 main :: IO ()
-main = hspec . spec . GerritServer "" "" =<< newIORef Nothing
+main = hspec . spec . GerritServer "" 29418 "" =<< newIORef False
 
 spec :: GerritServer -> Spec
 spec server = describe "unit tests" $ do

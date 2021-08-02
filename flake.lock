@@ -31,6 +31,23 @@
         "type": "github"
       }
     },
+    "libssh2-hs": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1627924635,
+        "narHash": "sha256-VGCmae2K/RULIkOefLgkYsp327svk8kulC8IEULbh5o=",
+        "owner": "TristanCacqueray",
+        "repo": "libssh2-hs",
+        "rev": "19bb4af0240381fe24d6b66c56ea97af53365836",
+        "type": "github"
+      },
+      "original": {
+        "owner": "TristanCacqueray",
+        "ref": "read-stderr",
+        "repo": "libssh2-hs",
+        "type": "github"
+      }
+    },
     "matrix-client": {
       "flake": false,
       "locked": {
@@ -66,6 +83,7 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "gerrit": "gerrit",
+        "libssh2-hs": "libssh2-hs",
         "matrix-client": "matrix-client",
         "nixpkgs": "nixpkgs"
       }

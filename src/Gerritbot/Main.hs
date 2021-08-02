@@ -305,8 +305,8 @@ main = do
   tqueue <- newTBMQueueIO 2048
 
   -- Ssh connection monitor
-  sshAliveRef <- newIORef Nothing
-  let gerritServer = Gerritbot.GerritServer (gerritHost args) (gerritUser args) sshAliveRef
+  sshAliveRef <- newIORef False
+  let gerritServer = Gerritbot.GerritServer (gerritHost args) 29418 (gerritUser args) sshAliveRef
 
   -- Spawn monitoring
   logMetric <- case monitoringPort args of
@@ -359,7 +359,7 @@ main = do
 
     monitoringApp aliveRef req resp = case Wai.rawPathInfo req of
       "/health" -> do
-        alive <- Gerritbot.isAlive aliveRef
+        alive <- readIORef aliveRef
         let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
         resp $ Wai.responseLBS status [] mempty
       "/metrics" -> do

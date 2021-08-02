@@ -1,1 +1,7 @@
+source-repository-package
+  type: git
+  location: https://github.com/TristanCacqueray/libssh2-hs/
+  tag: 19bb4af0240381fe24d6b66c56ea97af53365836
+  subdir: libssh2
+
 packages: . ../gerrit-haskell/ ../matrix-client-haskell/

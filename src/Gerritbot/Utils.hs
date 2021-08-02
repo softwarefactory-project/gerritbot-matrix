@@ -12,6 +12,7 @@ import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.STM.TBMQueue (TBMQueue)
 import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
 import qualified Data.HashTable.IO as HT
+import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
 import Prometheus (Counter)
 import qualified Prometheus
@@ -102,11 +103,15 @@ glob (p : ps) (x : xs) = p == x && glob ps xs
 glob [] [] = True
 glob _ _ = False
 
-logMsg :: Text -> IO ()
-logMsg msg = do
+doLog :: (Text -> IO ()) -> Text -> IO ()
+doLog sayFunc msg = do
   now <- getCurrentTime
   th <- myThreadId
-  say $ show now <> " [" <> show th <> "]: " <> msg
+  sayFunc $ Text.take 23 (show now) <> " [" <> show th <> "]: " <> msg
+
+logMsg, logErr :: Text -> IO ()
+logMsg = doLog say
+logErr = doLog sayErr
 
 eitherToError :: Show a => Text -> Either a b -> b
 eitherToError msg x = case x of
