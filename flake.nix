@@ -4,6 +4,8 @@
 {
   description = "The gerritbot-matrix application";
 
+  nixConfig.bash-prompt = "[nix]λ ";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
@@ -16,41 +18,50 @@
   outputs = { self, nixpkgs, flake-utils, gerrit, matrix-client }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # config = { allowBroken = true; };
+        config = { };
 
-        haskellPackages = pkgs.haskellPackages;
-
-        packageName = "gerritbot-matrix";
-      in rec {
-        packages.${packageName} =
-          haskellPackages.callCabal2nix packageName self {
-            relude = pkgs.haskell.lib.overrideCabal haskellPackages.relude {
-              version = "1.0.0.1";
-              sha256 = "0cw9a1gfvias4hr36ywdizhysnzbzxy20fb3jwmqmgjy40lzxp2g";
+        compilerVersion = "8104";
+        compiler = "ghc" + compilerVersion;
+        overlays = [
+          (final: prev: {
+            haskell-language-server = prev.haskell-language-server.override {
+              supportedGhcVersions = [ compilerVersion ];
             };
 
-            gerrit = haskellPackages.callCabal2nix "gerrit" gerrit { };
-            matrix-client =
-              haskellPackages.callCabal2nix "matrix-client" matrix-client { };
-          };
+            myHaskellPackages = prev.haskell.packages.${compiler}.override {
+              overrides = hpFinal: hpPrev: {
+                relude = prev.haskell.lib.overrideCabal hpPrev.relude {
+                  version = "1.0.0.1";
+                  sha256 =
+                    "0cw9a1gfvias4hr36ywdizhysnzbzxy20fb3jwmqmgjy40lzxp2g";
+                };
+                libssh2 = prev.haskell.lib.overrideCabal hpPrev.libssh2 {
+                  version = "0.2.0.8";
+                  sha256 =
+                    "01dc3przjwhh2aws74ypm19wqrp98mjjpsarhp69r1asq9dv0h0k";
+                  broken = false;
+                };
+                gerrit = hpPrev.callCabal2nix "gerrit" gerrit { };
+                matrix-client =
+                  hpPrev.callCabal2nix "matrix-client" matrix-client { };
+                gerritbot-matrix =
+                  hpPrev.callCabal2nix "gerritbot-matrix" ./. { };
+              };
+            };
 
-        packages.exe =
-          pkgs.haskell.lib.justStaticExecutables (packages.${packageName});
+          })
+        ];
 
-        defaultPackage = self.packages.${system}.${packageName};
+        pkgs = import nixpkgs { inherit config overlays system; };
 
-        devShell = pkgs.mkShell {
-          buildInputs = with haskellPackages; [
-            haskell-language-server
-            ghcid
-            cabal-install
-          ];
-          inputsFrom = builtins.attrValues self.packages.${system};
-        };
-
-        packages.containerImage = pkgs.dockerTools.buildLayeredImage {
+      in rec {
+        defaultPackage = packages.gerritbot-matrix;
+        defaultApp = apps.gerritbot-matrix;
+        defaultExe = pkgs.haskell.lib.justStaticExecutables defaultPackage;
+        defaultContainerImage = pkgs.dockerTools.buildLayeredImage {
           name = "gerritbot-matrix";
-          contents = [ packages.exe pkgs.openssh pkgs.curl pkgs.cacert ];
+          contents = [ defaultExe pkgs.openssh pkgs.curl pkgs.cacert ];
           extraCommands = "echo root:x:0:0:root:/root:/bin/bash > etc/passwd";
           config = {
             Entrypoint = [ "gerritbot-matrix" ];
@@ -58,5 +69,24 @@
           };
         };
 
+        packages = with pkgs.myHaskellPackages; {
+          inherit gerritbot-matrix;
+          containerImage = defaultContainerImage;
+        };
+
+        apps.gerritbot-matrix =
+          flake-utils.lib.mkApp { drv = packages.gerritbot-matrix; };
+
+        devShell = pkgs.myHaskellPackages.shellFor {
+          packages = p: [ p.gerritbot-matrix ];
+
+          buildInputs = with pkgs.myHaskellPackages; [
+            cabal-install
+            hlint
+            pkgs.haskell-language-server
+          ];
+
+          withHoogle = false;
+        };
       });
 }
