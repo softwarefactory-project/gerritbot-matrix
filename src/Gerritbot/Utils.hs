@@ -11,7 +11,8 @@ module Gerritbot.Utils where
 import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.STM.TBMQueue (TBMQueue)
 import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
-import Data.Time.Clock (getCurrentTime)
+import qualified Data.HashTable.IO as HT
+import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
 import Prometheus (Counter)
 import qualified Prometheus
 import Prometheus.Metric.GHC (ghcMetrics)
@@ -45,6 +46,37 @@ registerMetrics = do
   where
     mkCounter name desc =
       Prometheus.register $ Prometheus.counter (Prometheus.Info name desc)
+
+-------------------------------------------------------------------------------
+-- Identity cache
+
+newtype DB = DB (HT.BasicHashTable Text (Either UTCTime Text))
+
+dbNew :: IO DB
+dbNew = DB <$> HT.new
+
+dbGet :: DB -> (Text -> IO (Maybe Text)) -> Text -> IO (Maybe Text)
+dbGet (DB db) fetch user = do
+  now <- getCurrentTime
+  v <- HT.lookup db user
+  case v of
+    Just (Right userId) -> pure $ Just userId
+    Just (Left date) -> do
+      if nominalDiffTimeToSeconds (diffUTCTime now date) > 600
+        then doFetch now
+        else pure Nothing
+    Nothing -> doFetch now
+  where
+    doFetch now = do
+      userId <- fetch user
+      let v = case userId of
+            Just x -> Right x
+            Nothing -> Left now
+      HT.insert db user v
+      pure userId
+
+-------------------------------------------------------------------------------
+-- Utilities
 
 -- | Globing
 -- >>> glob "" ""

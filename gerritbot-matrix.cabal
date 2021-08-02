@@ -29,7 +29,6 @@ common common-options
 library
     import:           common-options
     exposed-modules:  Gerritbot
-                    , Gerritbot.Database
                     , Gerritbot.Main
                     , Gerritbot.Utils
     build-depends:    base < 5

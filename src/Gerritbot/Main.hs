@@ -32,7 +32,6 @@ import qualified Dhall.TH
 import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import qualified Gerritbot
-import qualified Gerritbot.Database as DB
 import Gerritbot.Utils
 import qualified Network.HTTP.Types.Status as HTTP
 import Network.Matrix.Client (ClientSession, MatrixToken (..), RoomID (..))
@@ -302,7 +301,7 @@ main = do
     (Nothing, _, _) -> pure . const . pure $ Nothing
 
   -- Setup queue
-  db <- DB.new
+  db <- dbNew
   tqueue <- newTBMQueueIO 2048
 
   -- Ssh connection monitor
@@ -328,7 +327,7 @@ main = do
   -- Go!
   Async.concurrently_
     (runGerrit gerritServer (onEvent config tqueue) logMetric)
-    (forever $ runMatrix sess retry (DB.get db idLookup) tqueue logMetric)
+    (forever $ runMatrix sess retry (dbGet db idLookup) tqueue logMetric)
   putTextLn "Done."
   where
     -- TODO: infer subscribe list from channels configuration
