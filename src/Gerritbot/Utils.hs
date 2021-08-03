@@ -103,15 +103,16 @@ glob (p : ps) (x : xs) = p == x && glob ps xs
 glob [] [] = True
 glob _ _ = False
 
-doLog :: (Text -> IO ()) -> Text -> IO ()
-doLog sayFunc msg = do
+doLog :: Handle -> Text -> IO ()
+doLog handle msg = do
   now <- getCurrentTime
   th <- myThreadId
-  sayFunc $ Text.take 23 (show now) <> " [" <> show th <> "]: " <> msg
+  hSay handle $ Text.take 23 (show now) <> " [" <> show th <> "]: " <> msg
+  hFlush handle
 
 logMsg, logErr :: Text -> IO ()
-logMsg = doLog say
-logErr = doLog sayErr
+logMsg = doLog stdout
+logErr = doLog stderr
 
 eitherToError :: Show a => Text -> Either a b -> b
 eitherToError msg x = case x of
