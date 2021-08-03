@@ -332,10 +332,11 @@ main = do
   config <- reloadConfig sess retry (configFile args)
 
   -- Go!
-  Async.concurrently_
+  Async.race_
     (runGerrit gerritServer (onEvent config tqueue) logMetric)
     (forever $ runMatrix sess retry (dbGet db idLookup) tqueue logMetric)
-  putTextLn "Done."
+  logErr "Oops, something went wrong."
+  exitFailure
   where
     -- TODO: infer subscribe list from channels configuration
     eventList =
