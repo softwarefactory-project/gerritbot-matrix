@@ -295,17 +295,19 @@ main = do
   args <- unwrapRecord "Gerritbot Matrix"
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
   idTokenM <- lookupEnv "MATRIX_IDENTITY_TOKEN"
-  idPepperM <- lookupEnv "MATRIX_IDENTITY_PEPPER"
 
   -- Create http manager
   sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
-  idLookup <- case (identityUrl args, idTokenM, idPepperM) of
-    (Just identityUrl, Just idToken, Just idPepper) -> do
+  idLookup <- case (identityUrl args, idTokenM) of
+    (Just identityUrl, Just idToken) | idToken /= mempty -> do
       idSess <- Matrix.createIdentitySession identityUrl $! MatrixToken (toText idToken)
-      pure $ mkIdLookup idSess (hashDetails $! idPepper)
-    (Just _, _, _) ->
-      error "Missing MATRIX_IDENTITY_TOKEN or MATRIX_IDENTITY_PEPPER environment"
-    (Nothing, _, _) -> pure . const . pure $ Nothing
+      hdE <- Matrix.hashDetails idSess
+      case hdE of
+        Left err -> fail $ "Could not get hash details: " <> show err
+        Right hd -> pure $ mkIdLookup idSess hd
+    (Just _, _) ->
+      error "Missing MATRIX_IDENTITY_TOKEN environment"
+    (Nothing, _) -> pure . const . pure $ Nothing
 
   -- Setup queue
   db <- dbNew
@@ -347,8 +349,6 @@ main = do
         Gerrit.PatchsetCreatedEvent
       ]
 
-    -- TODO: fetch from server
-    hashDetails = Matrix.HashDetails ("sha256" :| []) . toText
     mkIdLookup idSess hd email = do
       res <- Matrix.identityLookup idSess hd (Matrix.Email email)
       case res of
