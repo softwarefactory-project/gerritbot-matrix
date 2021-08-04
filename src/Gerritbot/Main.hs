@@ -46,7 +46,6 @@ import Options.Generic
 import qualified Prometheus
 import Relude
 import Relude.Extra.Group (groupBy)
-import Say (sayErr)
 import System.Directory (getModificationTime)
 
 -- | Command line interface
@@ -63,8 +62,6 @@ data CLI w = CLI
 
 instance ParseRecord (CLI Wrapped) where
   parseRecord = parseRecordWithModifiers lispCaseModifiers
-
-type RetryIO a = Matrix.MatrixIO a -> Matrix.MatrixIO a
 
 -- | Generate Haskell Type from Dhall Type
 -- See: https://hackage.haskell.org/package/dhall-1.38.0/docs/Dhall-TH.html
@@ -202,22 +199,24 @@ groupEvents events =
 
 -- | The matrix client
 sendEvents ::
+  Env ->
   -- | The matrix client session
   ClientSession ->
-  RetryIO Matrix.EventID ->
   -- | A function to lookup identity
   (Text -> IO (Maybe Text)) ->
   -- | A function to join and get roomID
   (Text -> IO (Maybe RoomID)) ->
   -- | A list of event to proces
   [MatrixEvent] ->
-  -- | The logMetric callback
-  (MetricEvent -> IO ()) ->
   IO ()
-sendEvents sess retry idLookup joinRoom events logMetric = do
+sendEvents env sess idLookup joinRoom events = do
   logMsg $ "Sending events " <> show events
   traverse_ send (groupEvents events)
   where
+    logRetry err = do
+      logMsg err
+      env & logMetric $ HttpRetry
+    retry = Matrix.retryWithLog 7 logRetry
     send :: MatrixMessage -> IO ()
     send (MatrixMessage room EventAction {..} messages ts _) = do
       -- Try to lookup matrix identity
@@ -242,13 +241,13 @@ sendEvents sess retry idLookup joinRoom events logMetric = do
       case roomIDM of
         Just roomID -> do
           res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
-          logMetric MatrixMessageSent
+          env & logMetric $ MatrixMessageSent
           print res
         Nothing -> logErr $ "Could not send " <> show roomMessage <> " to: " <> room
 
 -- | Sync the matrix client
-doSyncClient :: ClientSession -> RetryIO RoomID -> [Channel] -> IO [(RoomID, Channel)]
-doSyncClient sess retry channels = do
+doSyncClient :: ClientSession -> [Channel] -> IO [(RoomID, Channel)]
+doSyncClient sess channels = do
   -- Join unique channels
   let roomNames = nub $ fmap room channels
   roomIds <- traverse joinRoom roomNames
@@ -267,7 +266,7 @@ doSyncClient sess retry channels = do
     joinRoom roomName = do
       logMsg $ "Joining room " <> roomName
       eitherToError ("Failed to join " <> roomName)
-        <$> retry (Matrix.joinRoom sess roomName)
+        <$> Matrix.retry (Matrix.joinRoom sess roomName)
 
 -- | Creates an IO action that auto reload the config file if it changed
 reloadConfig :: FilePath -> IO (IO [Channel])
@@ -309,8 +308,26 @@ main = do
       exitSuccess
     _anyOtherArgs -> pure ()
 
-  -- Load the environment
   args <- unwrapRecord "Gerritbot Matrix"
+
+  -- Setup monitoring
+  alive <- newIORef False
+  env <- case monitoringPort args of
+    Just port -> do
+      logMetric <- logMetrics <$> registerMetrics
+      let env = Env logMetric alive
+      void $ Async.async (Warp.run port $ monitoringApp env)
+      pure env
+    Nothing -> pure $ Env (const $ pure ()) alive
+
+  mainBot args env
+
+  logErr "Oops, something went wrong."
+  exitFailure
+
+mainBot :: CLI Unwrapped -> Env -> IO ()
+mainBot args env = do
+  -- Load the environment
   token <- fromMaybe (error "Missing MATRIX_TOKEN environment") <$> lookupEnv "MATRIX_TOKEN"
   idTokenM <- lookupEnv "MATRIX_IDENTITY_TOKEN"
 
@@ -318,52 +335,34 @@ main = do
   sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
   validateSession sess
 
+  -- Setup room join function
+  joinRoom <- do
+    roomDB <- dbNew
+    pure $ dbGet roomDB 60 $ mkJoinRoom sess
+
+  -- Setup identity lookup function
   idLookup <- case (identityUrl args, idTokenM) of
     (Just identityUrl, Just idToken) | idToken /= mempty -> do
+      idDB <- dbNew
       idSess <- Matrix.createIdentitySession identityUrl $! MatrixToken (toText idToken)
       hdE <- Matrix.hashDetails idSess
       case hdE of
         Left err -> fail $ "Could not get hash details: " <> show err
-        Right hd -> pure $ mkIdLookup idSess hd
+        Right hd -> pure $ dbGet idDB 600 $ mkIdLookup idSess hd
     (Just _, _) ->
       error "Missing MATRIX_IDENTITY_TOKEN environment"
     (Nothing, _) -> pure . const . pure $ Nothing
 
-  -- Setup queue
+  -- Setup events queue
   tqueue <- newTBMQueueIO 2048
-
-  -- Ssh connection monitor
-  sshAliveRef <- newIORef False
-  let gerritServer = Gerritbot.GerritServer (gerritHost args) 29418 (gerritUser args) sshAliveRef
-
-  -- Spawn monitoring
-  logMetric <- case monitoringPort args of
-    Just port -> do
-      void $ Async.async (Warp.run port $ monitoringApp sshAliveRef)
-      logMetrics <$> registerMetrics
-    Nothing -> pure $ const $ pure ()
-
-  -- Network monitoring
-  let logRetry err = do
-        logMsg err
-        logMetric HttpRetry
-      retry = Matrix.retryWithLog 7 logRetry
 
   -- Load the config
   config <- reloadConfig $ configFile args
 
-  -- Setup lookup db
-  idDB <- dbNew
-  let idLookup' = dbGet idDB 600 idLookup
-  roomDB <- dbNew
-  let joinRoom' = dbGet roomDB 60 $ mkJoinRoom sess logMetric
-
   -- Go!
   Async.race_
-    (runGerrit gerritServer (onEvent config tqueue) logMetric)
-    (forever $ runMatrix sess retry idLookup' joinRoom' tqueue logMetric)
-  logErr "Oops, something went wrong."
-  exitFailure
+    (runGerrit (onEvent config tqueue))
+    (runMatrix tqueue (sendEvents env sess idLookup joinRoom))
   where
     -- TODO: infer subscribe list from channels configuration
     eventList =
@@ -379,15 +378,17 @@ main = do
       case res of
         Right (Just (Matrix.UserID x)) -> pure $ Just x
         Right Nothing -> pure Nothing
-        Left e -> sayErr ("Lookup failed: " <> show e) >> pure Nothing
+        Left e -> do
+          logErr $ "Lookup failed: " <> show e
+          env & logMetric $ HttpRetry
+          pure Nothing
 
-    mkJoinRoom :: ClientSession -> (MetricEvent -> IO ()) -> Text -> IO (Maybe RoomID)
-    mkJoinRoom sess logMetric room = do
+    mkJoinRoom sess room = do
       roomIDE <- Matrix.retry $ Matrix.joinRoom sess room
       case roomIDE of
         Left err -> do
           logErr $ "Fail to join " <> room <> ": " <> show err
-          logMetric HttpRetry
+          env & logMetric $ HttpRetry
           pure Nothing
         Right roomID -> do
           logMsg $ "Joined " <> room <> ": " <> show roomID
@@ -399,21 +400,23 @@ main = do
         Right owner -> logMsg $ "Session created for: " <> show owner
         Left err -> fail $ "Invalid matrix token: " <> show err
 
-    runGerrit server cb =
-      Gerritbot.runStreamClient server eventList cb
+    runGerrit cb =
+      let server = Gerritbot.GerritServer (gerritHost args) 29418 (gerritUser args)
+       in Gerritbot.runStreamClient env server eventList cb
 
-    runMatrix sess retry idLookup joinRoom tqueue logMetric = do
+    runMatrix tqueue cb = forever $ do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
-      sendEvents sess retry idLookup joinRoom events logMetric
+      void $ cb events
       threadDelay 100_000
 
-    monitoringApp aliveRef req resp = case Wai.rawPathInfo req of
-      "/health" -> do
-        alive <- readIORef aliveRef
-        let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
-        resp $ Wai.responseLBS status [] mempty
-      "/metrics" -> do
-        metrics <- Prometheus.exportMetricsAsText
-        resp $ Wai.responseLBS HTTP.ok200 [] metrics
-      _anyOtherPath -> resp $ Wai.responseLBS HTTP.notFound404 [] mempty
+monitoringApp :: Env -> Wai.Request -> (Wai.Response -> IO a) -> IO a
+monitoringApp env req resp = case Wai.rawPathInfo req of
+  "/health" -> do
+    alive <- readIORef (env & alive)
+    let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
+    resp $ Wai.responseLBS status [] mempty
+  "/metrics" -> do
+    metrics <- Prometheus.exportMetricsAsText
+    resp $ Wai.responseLBS HTTP.ok200 [] metrics
+  _anyOtherPath -> resp $ Wai.responseLBS HTTP.notFound404 [] mempty

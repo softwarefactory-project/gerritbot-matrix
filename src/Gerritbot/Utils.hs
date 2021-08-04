@@ -21,6 +21,11 @@ import Prometheus.Metric.GHC (ghcMetrics)
 import Relude
 import Say
 
+data Env = Env
+  { logMetric :: MetricEvent -> IO (),
+    alive :: IORef Bool
+  }
+
 data MetricEvent = SshRecon | HttpRetry | GerritEventReceived | MatrixMessageSent
 
 logMetrics :: Metrics -> MetricEvent -> IO ()

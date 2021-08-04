@@ -14,38 +14,34 @@ import qualified Control.Retry as Retry
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString as BS
 import Gerrit.Event (Event, EventType, eventName)
-import Gerritbot.Utils (MetricEvent (..), logErr, logMsg)
+import Gerritbot.Utils
 import qualified Network.SSH.Client.LibSSH2 as SSH
 import qualified Network.SSH.Client.LibSSH2.Errors as SSH
 import qualified Network.SSH.Client.LibSSH2.Foreign as SSH
 import Relude
 import System.Environment (getEnv)
 
-err :: Text -> IO ()
-err = logErr . mappend "[E] "
-
 data GerritServer = GerritServer
   { host :: Text,
     port :: Int,
-    username :: Text,
-    aliveRef :: IORef Bool
+    username :: Text
   }
 
 -- | 'runStreamClient' connects to a GerritServer with ssh and run the callback for each events.
 runStreamClient ::
+  Env ->
   GerritServer ->
   [EventType] ->
   (GerritServer -> Event -> IO ()) ->
-  (MetricEvent -> IO ()) ->
   IO ()
-runStreamClient server@GerritServer {..} subscribeList cb logMetric = void loop
+runStreamClient env server@GerritServer {..} subscribeList cb = void loop
   where
     -- Decode a single event and callback
     onEvent ev = do
-      logMetric GerritEventReceived
+      env & logMetric $ GerritEventReceived
       case Aeson.decodeStrict ev of
         Just v -> cb server v
-        Nothing -> err $ "Could not decode: " <> decodeUtf8 ev
+        Nothing -> logErr $ "Could not decode: " <> decodeUtf8 ev
 
     -- Process the events received
     onEvents = \case
@@ -70,14 +66,14 @@ runStreamClient server@GerritServer {..} subscribeList cb logMetric = void loop
 
     -- Create the process and start the reading loop
     runChannel ch = do
-      writeIORef aliveRef True
+      writeIORef (env & alive) True
       logMsg "Reading gerrit events stream..."
       SSH.channelExecute ch (toString $ unwords command)
 
       res <- runExceptT $ go ch ""
       case res of
-        Left e -> err e
-        Right () -> err "Stream silently failed"
+        Left e -> logErr e
+        Right () -> logErr "Stream silently failed"
 
       buf <- SSH.readChannelStderr ch 4096
       fail $
@@ -110,9 +106,9 @@ runStreamClient server@GerritServer {..} subscribeList cb logMetric = void loop
 
     -- Handle client exception
     handle inf e = do
-      err $ inf <> " error: " <> show e
-      writeIORef aliveRef True
-      logMetric SshRecon
+      logErr $ inf <> " error: " <> show e
+      writeIORef (env & alive) False
+      env & logMetric $ SshRecon
       pure True
     handlerSSH :: SSH.ErrorCode -> IO Bool
     handlerSSH code = handle "ssh" code
