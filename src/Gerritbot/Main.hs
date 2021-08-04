@@ -310,7 +310,6 @@ main = do
     (Nothing, _) -> pure . const . pure $ Nothing
 
   -- Setup queue
-  db <- dbNew
   tqueue <- newTBMQueueIO 2048
 
   -- Ssh connection monitor
@@ -333,10 +332,14 @@ main = do
   -- Load the config
   config <- reloadConfig sess retry (configFile args)
 
+  -- Setup lookup db
+  idDB <- dbNew
+  let idLookup' = dbGet idDB 600 idLookup
+
   -- Go!
   Async.race_
     (runGerrit gerritServer (onEvent config tqueue) logMetric)
-    (forever $ runMatrix sess retry (dbGet db idLookup) tqueue logMetric)
+    (forever $ runMatrix sess retry idLookup' tqueue logMetric)
   logErr "Oops, something went wrong."
   exitFailure
   where

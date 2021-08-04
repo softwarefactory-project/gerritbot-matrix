@@ -11,6 +11,7 @@ module Gerritbot.Utils where
 import Control.Concurrent (myThreadId, threadDelay)
 import Control.Concurrent.STM.TBMQueue (TBMQueue)
 import qualified Control.Concurrent.STM.TBMQueue as TBMQueue
+import Data.Fixed (Pico)
 import qualified Data.HashTable.IO as HT
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
@@ -49,32 +50,34 @@ registerMetrics = do
       Prometheus.register $ Prometheus.counter (Prometheus.Info name desc)
 
 -------------------------------------------------------------------------------
--- Identity cache
+-- A refreshable database, to store roomID and identity lookup result
 
-newtype DB = DB (HT.BasicHashTable Text (Either UTCTime Text))
+-- | 'DB k v' is a mutable hashtable of key 'k' and value 'v' type.
+--   The value is either a failure timestamp or the actual value.
+newtype DB k v = DB (HT.BasicHashTable k (Either UTCTime v))
 
-dbNew :: IO DB
+dbNew :: IO (DB k v)
 dbNew = DB <$> HT.new
 
-dbGet :: DB -> (Text -> IO (Maybe Text)) -> Text -> IO (Maybe Text)
-dbGet (DB db) fetch user = do
+dbGet :: (Hashable k, Eq k) => DB k v -> Pico -> (k -> IO (Maybe v)) -> k -> IO (Maybe v)
+dbGet (DB db) delay fetch key = do
   now <- getCurrentTime
-  v <- HT.lookup db user
-  case v of
-    Just (Right userId) -> pure $ Just userId
+  valueME <- HT.lookup db key
+  case valueME of
+    Just (Right value) -> pure $ Just value
     Just (Left date) -> do
-      if nominalDiffTimeToSeconds (diffUTCTime now date) > 600
+      if nominalDiffTimeToSeconds (diffUTCTime now date) > delay
         then doFetch now
         else pure Nothing
     Nothing -> doFetch now
   where
     doFetch now = do
-      userId <- fetch user
-      let v = case userId of
+      valueM <- fetch key
+      let value = case valueM of
             Just x -> Right x
             Nothing -> Left now
-      HT.insert db user v
-      pure userId
+      HT.insert db key value
+      pure valueM
 
 -------------------------------------------------------------------------------
 -- Utilities
