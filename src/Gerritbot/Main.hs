@@ -23,7 +23,9 @@ import Control.Concurrent.STM.TBMQueue (TBMQueue, newTBMQueueIO, writeTBMQueue)
 import Data.Bits ((.|.))
 import Data.Digest.Pure.SHA (sha1, showDigest)
 import qualified Data.HashMap.Strict as HM
+import Data.List (nub)
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map.Strict as Map
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
 import Dhall hiding (maybe, void)
 import qualified Dhall.Core
@@ -77,6 +79,9 @@ configurationSchema = $(Dhall.TH.staticDhallExpression "(./src/Config.dhall).Typ
 
 deriving instance Eq EventType
 
+-------------------------------------------------------------------------------
+-- Convert initial gerrit event to a matrix event
+
 -- | Compare gerritbot event type config with original gerrit type
 eventEquals :: Gerrit.EventType -> EventType -> Bool
 eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
@@ -98,14 +103,14 @@ newtype EventObject = EventObject {unObject :: Doc}
 data MatrixEvent = MatrixEvent
   { meAction :: EventAction,
     meObject :: EventObject,
-    meRoomId :: RoomID,
+    meRoom :: Text,
     meTime :: Int64
   }
   deriving (Show, Eq)
 
 -- | Prepare a Matrix Event
-toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> RoomID -> MatrixEvent
-toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = MatrixEvent {..}
+toMatrixEvent :: SystemTime -> Gerrit.Change -> Gerrit.User -> Gerrit.Event -> Text -> MatrixEvent
+toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = MatrixEvent {..}
   where
     meTime = fromMaybe now (Gerrit.getCreatedOn event)
     meAction = EventAction {..}
@@ -130,10 +135,10 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoomId = Matr
         then ""
         else " " <> changeBranch
 
--- | Find if a channel match a change, return the roomId
-getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> (RoomID, Channel) -> Maybe RoomID
-getEventRoom GerritServer {..} eventType Gerrit.Change {..} (roomId, Channel {..})
-  | serverMatch && projectMatch && branchMatch && eventMatch = Just roomId
+-- | Find if a channel match a change, return the room name
+getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Text
+getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
+  | serverMatch && projectMatch && branchMatch && eventMatch = Just room
   | otherwise = Nothing
   where
     match eventValue confValue = glob (toString confValue) (toString eventValue)
@@ -143,7 +148,7 @@ getEventRoom GerritServer {..} eventType Gerrit.Change {..} (roomId, Channel {..
     eventMatch = any (eventEquals eventType) events
 
 -- | The gerritbot callback
-onEvent :: IO [(RoomID, Channel)] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
+onEvent :: IO [Channel] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
 onEvent config tqueue server event =
   case (Gerrit.getChange event, Gerrit.getUser event) of
     (Just change, Just user) -> do
@@ -161,7 +166,7 @@ onEvent config tqueue server event =
       atomically $ writeTBMQueue tqueue (mkMatrixEvent roomId)
 
 data MatrixMessage = MatrixMessage
-  { mmRoomID :: RoomID,
+  { mmRoom :: Text,
     mmEventAction :: EventAction,
     mmObjects :: NonEmpty EventObject,
     mmTS :: Int64,
@@ -180,7 +185,7 @@ groupEvents events =
       -- groupBy may have changed the order, thus we need to re-sort by the initial gerrit event timestamp.
       let xs = NE.sortWith meTime xs'
           (x :| _) = xs
-          mmRoomID = meRoomId x
+          mmRoom = meRoom x
           mmEventAction = meAction x
           mmObjects = meObject <$> xs
           mmTS = mkTransactionId xs
@@ -193,7 +198,7 @@ groupEvents events =
     groupUserEvent :: [MatrixEvent] -> [NonEmpty MatrixEvent]
     groupUserEvent = HM.elems . groupBy meAction
     groupRoomEvents :: [MatrixEvent] -> [[MatrixEvent]]
-    groupRoomEvents = fmap toList . HM.elems . groupBy meRoomId
+    groupRoomEvents = fmap toList . HM.elems . groupBy meRoom
 
 -- | The matrix client
 sendEvents ::
@@ -202,17 +207,19 @@ sendEvents ::
   RetryIO Matrix.EventID ->
   -- | A function to lookup identity
   (Text -> IO (Maybe Text)) ->
+  -- | A function to join and get roomID
+  (Text -> IO (Maybe RoomID)) ->
   -- | A list of event to proces
   [MatrixEvent] ->
   -- | The logMetric callback
   (MetricEvent -> IO ()) ->
   IO ()
-sendEvents sess retry idLookup events logMetric = do
+sendEvents sess retry idLookup joinRoom events logMetric = do
   logMsg $ "Sending events " <> show events
   traverse_ send (groupEvents events)
   where
     send :: MatrixMessage -> IO ()
-    send (MatrixMessage roomID EventAction {..} messages ts _) = do
+    send (MatrixMessage room EventAction {..} messages ts _) = do
       -- Try to lookup matrix identity
       authorDoc <- case eaAuthorMail of
         Just mail -> do
@@ -231,24 +238,40 @@ sendEvents sess retry idLookup events logMetric = do
           roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
 
       -- Send the message
-      res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
-      logMetric MatrixMessageSent
-      print res
+      roomIDM <- joinRoom room
+      case roomIDM of
+        Just roomID -> do
+          res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
+          logMetric MatrixMessageSent
+          print res
+        Nothing -> logErr $ "Could not send " <> show roomMessage <> " to: " <> room
 
 -- | Sync the matrix client
-doSyncClient :: ClientSession -> RetryIO RoomID -> [Channel] -> IO [RoomID]
-doSyncClient sess retry = traverse joinRoom
+doSyncClient :: ClientSession -> RetryIO RoomID -> [Channel] -> IO [(RoomID, Channel)]
+doSyncClient sess retry channels = do
+  -- Join unique channels
+  let roomNames = nub $ fmap room channels
+  roomIds <- traverse joinRoom roomNames
+  putTextLn $ "Joined: " <> show roomIds
+
+  -- TODO: get all joined room and leave unknown room
+  -- joinedRooms <- Matrix.getJoinedRooms sess
+
+  let roomNamesIds = Map.fromList $ zip roomNames roomIds
+      getRoomID channel =
+        fromMaybe (error $ "Uknown room: " <> room channel) $
+          Map.lookup (room channel) roomNamesIds
+  pure $ fmap (\channel -> (getRoomID channel, channel)) channels
   where
-    -- TODO: leave room that are no longer configured
-    joinRoom :: Channel -> IO RoomID
-    joinRoom Channel {..} = do
-      logMsg $ "Joining room " <> room
-      eitherToError ("Failed to join " <> room)
-        <$> retry (Matrix.joinRoom sess room)
+    joinRoom :: Text -> IO RoomID
+    joinRoom roomName = do
+      logMsg $ "Joining room " <> roomName
+      eitherToError ("Failed to join " <> roomName)
+        <$> retry (Matrix.joinRoom sess roomName)
 
 -- | Creates an IO action that auto reload the config file if it changed
-reloadConfig :: ClientSession -> RetryIO RoomID -> FilePath -> IO (IO [(RoomID, Channel)])
-reloadConfig sess retry fp = do
+reloadConfig :: FilePath -> IO (IO [Channel])
+reloadConfig fp = do
   -- Get the current config
   configTS <- getModificationTime fp
   config <- load
@@ -268,12 +291,7 @@ reloadConfig sess retry fp = do
           pure config
         else pure prevConfig
 
-    load = do
-      channels <- Dhall.input auto (toText fp)
-      roomIds <- doSyncClient sess retry channels
-      putTextLn $ "Joined: " <> show roomIds
-      -- TODO: get all joined room and leave unknown room
-      pure $ zip roomIds channels
+    load = Dhall.input auto (toText fp)
 
 -- | gerritbot-matrix entrypoint
 main :: IO ()
@@ -298,6 +316,8 @@ main = do
 
   -- Create http manager
   sess <- Matrix.createSession (homeserverUrl args) $! MatrixToken (toText token)
+  validateSession sess
+
   idLookup <- case (identityUrl args, idTokenM) of
     (Just identityUrl, Just idToken) | idToken /= mempty -> do
       idSess <- Matrix.createIdentitySession identityUrl $! MatrixToken (toText idToken)
@@ -330,16 +350,18 @@ main = do
       retry = Matrix.retryWithLog 7 logRetry
 
   -- Load the config
-  config <- reloadConfig sess retry (configFile args)
+  config <- reloadConfig $ configFile args
 
   -- Setup lookup db
   idDB <- dbNew
   let idLookup' = dbGet idDB 600 idLookup
+  roomDB <- dbNew
+  let joinRoom' = dbGet roomDB 60 $ mkJoinRoom sess logMetric
 
   -- Go!
   Async.race_
     (runGerrit gerritServer (onEvent config tqueue) logMetric)
-    (forever $ runMatrix sess retry idLookup' tqueue logMetric)
+    (forever $ runMatrix sess retry idLookup' joinRoom' tqueue logMetric)
   logErr "Oops, something went wrong."
   exitFailure
   where
@@ -359,13 +381,31 @@ main = do
         Right Nothing -> pure Nothing
         Left e -> sayErr ("Lookup failed: " <> show e) >> pure Nothing
 
+    mkJoinRoom :: ClientSession -> (MetricEvent -> IO ()) -> Text -> IO (Maybe RoomID)
+    mkJoinRoom sess logMetric room = do
+      roomIDE <- Matrix.retry $ Matrix.joinRoom sess room
+      case roomIDE of
+        Left err -> do
+          logErr $ "Fail to join " <> room <> ": " <> show err
+          logMetric HttpRetry
+          pure Nothing
+        Right roomID -> do
+          logMsg $ "Joined " <> room <> ": " <> show roomID
+          pure $ Just roomID
+
+    validateSession sess = do
+      ownerE <- Matrix.retry $ Matrix.getTokenOwner sess
+      case ownerE of
+        Right owner -> logMsg $ "Session created for: " <> show owner
+        Left err -> fail $ "Invalid matrix token: " <> show err
+
     runGerrit server cb =
       Gerritbot.runStreamClient server eventList cb
 
-    runMatrix sess retry idLookup tqueue logMetric = do
+    runMatrix sess retry idLookup joinRoom tqueue logMetric = do
       logMsg "Waiting for events"
       events <- bufferQueueRead 5_000_000 tqueue
-      sendEvents sess retry idLookup events logMetric
+      sendEvents sess retry idLookup joinRoom events logMetric
       threadDelay 100_000
 
     monitoringApp aliveRef req resp = case Wai.rawPathInfo req of

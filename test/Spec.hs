@@ -8,7 +8,6 @@ import qualified Gerrit.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import Gerritbot.Main hiding (main)
 import Gerritbot.Utils
-import Network.Matrix.Client (RoomID (..))
 import Relude
 import Test.Hspec
 
@@ -28,8 +27,8 @@ spec server = describe "unit tests" $ do
         servers = ["*"]
         channel = Channel {..}
         change = fakeChange "software-factory/gerritbot-haskell" "main"
-     in getEventRoom server Gerrit.PatchsetCreatedEvent change (RoomID "!testRoom", channel)
-          `shouldBe` Just (RoomID "!testRoom")
+     in getEventRoom server Gerrit.PatchsetCreatedEvent change channel
+          `shouldBe` Just "testRoom"
   it "group event" $ do
     let events =
           [ -- Sequencial events
@@ -75,7 +74,7 @@ spec server = describe "unit tests" $ do
         EventObject "change3"
       )
     (room1, room2) =
-      (RoomID "room1", RoomID "room2")
+      ("room1", "room2")
     formatMessages (EventAction _ _ action) objects =
       DocBody [action, DocList $ fmap unObject objects]
     fakeUser :: Gerrit.User
