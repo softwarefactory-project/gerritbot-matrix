@@ -41,11 +41,11 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
       env & logMetric $ GerritEventReceived
       case Aeson.decodeStrict ev of
         Just v -> cb server v
-        Nothing -> logErr $ "Could not decode: " <> decodeUtf8 ev
+        Nothing -> logErr $ SshDecodeError ev
 
     -- Process the events received
     onEvents = \case
-      [] -> throwE "No events"
+      [] -> throwE SshEmptyEvent
       -- The last event is not completed and we need to accumulate more data before processing.
       [x] -> pure x
       (x : xs) -> liftIO (onEvent x) >> onEvents xs
@@ -55,11 +55,11 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
       eof <- liftIO $ SSH.channelIsEOF ch
       when eof $ do
         ret <- liftIO $ SSH.channelExitStatus ch
-        throwE $ "Gerrit process exited: " <> show ret
+        throwE $ SshExitCode ret
 
       buf <- liftIO $ SSH.readChannel ch 1024
       when (BS.null buf) $
-        throwE $ "Empty gerrit response, remaining " <> show acc
+        throwE $ SshEmpty acc
 
       let newLine = 10
       go ch =<< onEvents (BS.split newLine $ acc <> buf)
@@ -67,13 +67,13 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
     -- Create the process and start the reading loop
     runChannel ch = do
       writeIORef (env & alive) True
-      logMsg "Reading gerrit events stream..."
+      logMsg SshReady
       SSH.channelExecute ch (toString $ unwords command)
 
       res <- runExceptT $ go ch ""
       case res of
         Left e -> logErr e
-        Right () -> logErr "Stream silently failed"
+        Right () -> logErr SshExit
 
       buf <- SSH.readChannelStderr ch 4096
       fail $
@@ -89,7 +89,7 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
       let known_hosts = home <> "/.ssh/known_hosts"
           public = home <> "/.ssh/id_rsa.pub"
           private = home <> "/.ssh/id_rsa"
-      logMsg $ "Connecting to " <> host <> ":" <> show port
+      logMsg $ Connecting host port
       SSH.withSSH2
         known_hosts
         public
@@ -105,12 +105,12 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
     handlers = [\_ -> Handler handlerSSH, \_ -> Handler handlerNetwork]
 
     -- Handle client exception
-    handle inf e = do
-      logErr $ inf <> " error: " <> show e
+    handle ev = do
+      logErr ev
       writeIORef (env & alive) False
       env & logMetric $ SshRecon
       pure True
     handlerSSH :: SSH.ErrorCode -> IO Bool
-    handlerSSH code = handle "ssh" code
+    handlerSSH code = handle $ SshError $ show code
     handlerNetwork :: IOException -> IO Bool
-    handlerNetwork exc = handle "network" exc
+    handlerNetwork exc = handle $ IoError $ show exc

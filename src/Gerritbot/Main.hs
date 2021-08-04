@@ -210,11 +210,11 @@ sendEvents ::
   [MatrixEvent] ->
   IO ()
 sendEvents env sess idLookup joinRoom events = do
-  logMsg $ "Sending events " <> show events
+  -- logMsg $ "Sending events " <> show events
   traverse_ send (groupEvents events)
   where
     logRetry err = do
-      logMsg err
+      logErr $ HttpError err
       env & logMetric $ HttpRetry
     retry = Matrix.retryWithLog 7 logRetry
     send :: MatrixMessage -> IO ()
@@ -243,7 +243,7 @@ sendEvents env sess idLookup joinRoom events = do
           res <- retry $ Matrix.sendMessage sess roomID (Matrix.EventRoomMessage roomMessage) (Matrix.TxnID txnId)
           env & logMetric $ MatrixMessageSent
           print res
-        Nothing -> logErr $ "Could not send " <> show roomMessage <> " to: " <> room
+        Nothing -> logErr $ MatrixPostError (show roomMessage) room
 
 -- | Sync the matrix client
 doSyncClient :: ClientSession -> [Channel] -> IO [(RoomID, Channel)]
@@ -264,7 +264,7 @@ doSyncClient sess channels = do
   where
     joinRoom :: Text -> IO RoomID
     joinRoom roomName = do
-      logMsg $ "Joining room " <> roomName
+      putTextLn $ "Joining room " <> roomName
       eitherToError ("Failed to join " <> roomName)
         <$> Matrix.retry (Matrix.joinRoom sess roomName)
 
@@ -322,7 +322,7 @@ main = do
 
   mainBot args env
 
-  logErr "Oops, something went wrong."
+  logErr BotExit
   exitFailure
 
 mainBot :: CLI Unwrapped -> Env -> IO ()
@@ -379,7 +379,7 @@ mainBot args env = do
         Right (Just (Matrix.UserID x)) -> pure $ Just x
         Right Nothing -> pure Nothing
         Left e -> do
-          logErr $ "Lookup failed: " <> show e
+          logErr $ MatrixLookupFail (show e)
           env & logMetric $ HttpRetry
           pure Nothing
 
@@ -387,17 +387,17 @@ mainBot args env = do
       roomIDE <- Matrix.retry $ Matrix.joinRoom sess room
       case roomIDE of
         Left err -> do
-          logErr $ "Fail to join " <> room <> ": " <> show err
+          logErr $ MatrixJoinError (show err) room
           env & logMetric $ HttpRetry
           pure Nothing
         Right roomID -> do
-          logMsg $ "Joined " <> room <> ": " <> show roomID
+          logMsg $ JoinedRoom room roomID
           pure $ Just roomID
 
     validateSession sess = do
       ownerE <- Matrix.retry $ Matrix.getTokenOwner sess
       case ownerE of
-        Right owner -> logMsg $ "Session created for: " <> show owner
+        Right owner -> logMsg $ MatrixLoggedIn owner
         Left err -> fail $ "Invalid matrix token: " <> show err
 
     runGerrit cb =
@@ -405,7 +405,7 @@ mainBot args env = do
        in Gerritbot.runStreamClient env server eventList cb
 
     runMatrix tqueue cb = forever $ do
-      logMsg "Waiting for events"
+      logMsg MatrixReady
       events <- bufferQueueRead 5_000_000 tqueue
       void $ cb events
       threadDelay 100_000

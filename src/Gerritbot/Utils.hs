@@ -15,6 +15,7 @@ import Data.Fixed (Pico)
 import qualified Data.HashTable.IO as HT
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
+import Network.Matrix.Client (RoomID, UserID)
 import Prometheus (Counter)
 import qualified Prometheus
 import Prometheus.Metric.GHC (ghcMetrics)
@@ -118,9 +119,51 @@ doLog handle msg = do
   hSay handle $ Text.take 23 (show now) <> " [" <> show th <> "]: " <> msg
   hFlush handle
 
-logMsg, logErr :: Text -> IO ()
-logMsg = doLog stdout
-logErr = doLog stderr
+data LogEvent
+  = Connecting Text Int
+  | SshReady
+  | MatrixLoggedIn UserID
+  | MatrixReady
+  | JoinedRoom Text RoomID
+
+logMsg :: LogEvent -> IO ()
+logMsg ev = doLog stdout $ case ev of
+  Connecting host port -> "Connecting to " <> host <> ":" <> show port
+  SshReady -> "Reading gerrit events stream..."
+  MatrixReady -> "Waiting for events..."
+  MatrixLoggedIn owner -> "Session created for: " <> show owner
+  JoinedRoom room roomID -> "Joined " <> room <> ": " <> show roomID
+
+data ErrorEvent
+  = SshError Text
+  | IoError Text
+  | HttpError Text
+  | SshExit
+  | BotExit
+  | SshExitCode Int
+  | SshEmpty ByteString
+  | SshDecodeError ByteString
+  | SshEmptyEvent
+  | MatrixJoinError Text Text
+  | MatrixPostError Text Text
+  | MatrixLookupFail Text
+
+logErr :: ErrorEvent -> IO ()
+logErr ev =
+  doLog stderr $
+    "[ERROR] " <> case ev of
+      SshError e -> "ssh error: " <> e
+      IoError e -> "network error: " <> e
+      HttpError e -> e
+      SshExit -> "ssh process exit"
+      SshEmpty bs -> "empty ssh read, remaining " <> show bs
+      SshEmptyEvent -> "empty ssh event received"
+      SshExitCode ret -> "ssh process exited: " <> show ret
+      SshDecodeError bs -> "ssh decode error: " <> decodeUtf8 bs
+      MatrixPostError msg room -> "matrix post failure " <> msg <> " to: " <> show room
+      MatrixJoinError msg room -> "Fail to join " <> show room <> ": " <> msg
+      MatrixLookupFail msg -> "Lookup failed: " <> msg
+      BotExit -> "oops, something went wrong."
 
 eitherToError :: Show a => Text -> Either a b -> b
 eitherToError msg x = case x of
@@ -131,7 +174,6 @@ eitherToError msg x = case x of
 bufferQueueRead :: Int -> TBMQueue a -> IO [a]
 bufferQueueRead maxTime tqueue = do
   event <- fromMaybe (error "Queue is closed") <$> atomically (TBMQueue.readTBMQueue tqueue)
-  logMsg "Got one event, now buffering"
   threadDelay maxTime
   atomically $ drainQueue [event]
   where
