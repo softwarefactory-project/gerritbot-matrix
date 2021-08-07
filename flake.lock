@@ -34,16 +34,16 @@
     "libssh2-hs": {
       "flake": false,
       "locked": {
-        "lastModified": 1627924635,
-        "narHash": "sha256-VGCmae2K/RULIkOefLgkYsp327svk8kulC8IEULbh5o=",
+        "lastModified": 1628360583,
+        "narHash": "sha256-fc7t4isPAgKyp1HL0BL24+gnHuXvuVwsZUmV4cOmL8I=",
         "owner": "TristanCacqueray",
         "repo": "libssh2-hs",
-        "rev": "19bb4af0240381fe24d6b66c56ea97af53365836",
+        "rev": "db15640f09b8f1663dedb22b612ebf708b1cf18a",
         "type": "github"
       },
       "original": {
         "owner": "TristanCacqueray",
-        "ref": "read-stderr",
+        "ref": "integration",
         "repo": "libssh2-hs",
         "type": "github"
       }

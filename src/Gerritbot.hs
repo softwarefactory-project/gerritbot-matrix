@@ -98,7 +98,10 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
         (toString username)
         (toString host)
         port
-        (`SSH.withChannel` runChannel)
+        ( \sess -> do
+            SSH.keepaliveConfig sess True 60
+            SSH.withChannel sess runChannel
+        )
 
     -- Catch exception and retry after 1 second
     loop = Retry.recovering (Retry.constantDelay 1_000_000) handlers (const connect)

@@ -17,7 +17,7 @@
       type = "github";
       owner = "TristanCacqueray";
       repo = "libssh2-hs";
-      ref = "read-stderr";
+      ref = "integration";
       flake = false;
     };
   };
