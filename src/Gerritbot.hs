@@ -79,6 +79,7 @@ runStreamClient env server@GerritServer {..} subscribeList cb = void loop
     sshCommand =
       ["-p", "29418"]
         <> ["-o", "ConnectTimeout=" <> show connectionTimeout]
+        <> ["-o", "ServerAliveInterval=240"]
         <> ["-l", username, host]
         <> command
     sshProc = Turtle.inproc "ssh" sshCommand (pure mempty)
