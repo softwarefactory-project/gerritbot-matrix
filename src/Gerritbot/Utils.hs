@@ -24,7 +24,7 @@ import Say
 
 data Env = Env
   { logMetric :: MetricEvent -> IO (),
-    alive :: IORef Bool
+    alive :: IORef (Maybe Int64)
   }
 
 data MetricEvent = SshRecon | HttpRetry | GerritEventReceived | MatrixMessageSent
@@ -121,7 +121,6 @@ doLog handle msg = do
 
 data LogEvent
   = Connecting Text Int
-  | SshReady
   | MatrixLoggedIn UserID
   | MatrixReady
   | JoinedRoom Text RoomID
@@ -129,7 +128,6 @@ data LogEvent
 logMsg :: LogEvent -> IO ()
 logMsg ev = doLog stdout $ case ev of
   Connecting host port -> "Connecting to " <> host <> ":" <> show port
-  SshReady -> "Reading gerrit events stream..."
   MatrixReady -> "Waiting for events..."
   MatrixLoggedIn owner -> "Session created for: " <> show owner
   JoinedRoom room roomID -> "Joined " <> room <> ": " <> show roomID
@@ -138,12 +136,9 @@ data ErrorEvent
   = SshError Text
   | IoError Text
   | HttpError Text
-  | SshExit
   | BotExit
   | SshExitCode Int
-  | SshEmpty ByteString
-  | SshDecodeError ByteString
-  | SshEmptyEvent
+  | SshDecodeError Text
   | MatrixJoinError Text Text
   | MatrixPostError Text Text
   | MatrixLookupFail Text
@@ -155,11 +150,8 @@ logErr ev =
       SshError e -> "ssh error: " <> e
       IoError e -> "network error: " <> e
       HttpError e -> e
-      SshExit -> "ssh process exit"
-      SshEmpty bs -> "empty ssh read, remaining " <> show bs
-      SshEmptyEvent -> "empty ssh event received"
       SshExitCode ret -> "ssh process exited: " <> show ret
-      SshDecodeError bs -> "ssh decode error: " <> decodeUtf8 bs
+      SshDecodeError txt -> "ssh decode error: " <> txt
       MatrixPostError msg room -> "matrix post failure " <> msg <> " to: " <> show room
       MatrixJoinError msg room -> "Fail to join " <> show room <> ": " <> msg
       MatrixLookupFail msg -> "Lookup failed: " <> msg

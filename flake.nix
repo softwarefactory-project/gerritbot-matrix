@@ -13,16 +13,9 @@
     gerrit.flake = false;
     matrix-client.url = "github:softwarefactory-project/matrix-client-haskell";
     matrix-client.flake = false;
-    libssh2-hs = {
-      type = "github";
-      owner = "TristanCacqueray";
-      repo = "libssh2-hs";
-      ref = "integration";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, gerrit, matrix-client, libssh2-hs }:
+  outputs = { self, nixpkgs, flake-utils, gerrit, matrix-client }:
     flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
       let
         # config = { allowBroken = true; };
@@ -43,11 +36,6 @@
                   sha256 =
                     "0cw9a1gfvias4hr36ywdizhysnzbzxy20fb3jwmqmgjy40lzxp2g";
                 };
-                libssh2 = prev.haskell.lib.overrideCabal hpPrev.libssh2 {
-                  version = "0.2.0.8";
-                  src = "${libssh2-hs}/libssh2";
-                  broken = false;
-                };
                 gerrit = hpPrev.callCabal2nix "gerrit" gerrit { };
                 matrix-client =
                   hpPrev.callCabal2nix "matrix-client" matrix-client { };
@@ -67,7 +55,8 @@
         defaultExe = pkgs.haskell.lib.justStaticExecutables defaultPackage;
         defaultContainerImage = pkgs.dockerTools.buildLayeredImage {
           name = "gerritbot-matrix";
-          contents = [ defaultExe pkgs.cacert ];
+          contents = [ defaultExe pkgs.openssh pkgs.cacert ];
+          extraCommands = "echo root:x:0:0:root:/root:/bin/bash > etc/passwd";
           config = {
             Entrypoint = [ "gerritbot-matrix" ];
             Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" "HOME=/root" ];

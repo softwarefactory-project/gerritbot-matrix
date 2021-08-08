@@ -311,7 +311,7 @@ main = do
   args <- unwrapRecord "Gerritbot Matrix"
 
   -- Setup monitoring
-  alive <- newIORef False
+  alive <- newIORef Nothing
   env <- case monitoringPort args of
     Just port -> do
       logMetric <- logMetrics <$> registerMetrics
@@ -413,7 +413,7 @@ mainBot args env = do
 monitoringApp :: Env -> Wai.Request -> (Wai.Response -> IO a) -> IO a
 monitoringApp env req resp = case Wai.rawPathInfo req of
   "/health" -> do
-    alive <- readIORef (env & alive)
+    alive <- Gerritbot.isAlive (env & alive)
     let status = if alive then HTTP.ok200 else HTTP.serviceUnavailable503
     resp $ Wai.responseLBS status [] mempty
   "/metrics" -> do

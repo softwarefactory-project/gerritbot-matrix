@@ -38,11 +38,11 @@ library
                     , directory
                     , dhall
                     , exceptions
+                    , foldl
                     , gerrit
                     , hashtables
                     , http-types
                     , http-client
-                    , libssh2                ^>= 0.2
                     , matrix-client
                     , optparse-generic       ^>= 1.4
                     , prometheus-client      ^>= 1.0
@@ -52,8 +52,8 @@ library
                     , say
                     , stm-chans              ^>= 3.0
                     , time
-                    , transformers
                     , text                   ^>= 1.2
+                    , turtle
                     , wai                    ^>= 3.2
                     , warp                   ^>= 3.3
     hs-source-dirs:   src/
