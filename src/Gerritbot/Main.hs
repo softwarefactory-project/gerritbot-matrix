@@ -310,6 +310,7 @@ main = do
     _anyOtherArgs -> pure ()
 
   args <- unwrapRecord "Gerritbot Matrix"
+  labelMyThread "Main"
 
   -- Setup monitoring
   alive <- newIORef Nothing
@@ -362,8 +363,8 @@ mainBot args env = do
 
   -- Go!
   Async.race_
-    (runGerrit (onEvent config tqueue))
-    (runMatrix tqueue (sendEvents env sess idLookup joinRoom))
+    (labelMyThread "Gerrit" >> runGerrit (onEvent config tqueue))
+    (labelMyThread "Matrix" >> runMatrix tqueue (sendEvents env sess idLookup joinRoom))
   where
     -- TODO: infer subscribe list from channels configuration
     eventList =

@@ -15,12 +15,16 @@ import Data.Fixed (Pico)
 import qualified Data.HashTable.IO as HT
 import qualified Data.Text as Text
 import Data.Time.Clock (UTCTime, diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
+import GHC.Conc (labelThread)
 import Network.Matrix.Client (RoomID, UserID)
 import Prometheus (Counter)
 import qualified Prometheus
 import Prometheus.Metric.GHC (ghcMetrics)
 import Relude
 import Say
+
+labelMyThread :: String -> IO ()
+labelMyThread name = flip labelThread name =<< myThreadId
 
 data Env = Env
   { logMetric :: MetricEvent -> IO (),
