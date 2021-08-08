@@ -231,10 +231,11 @@ sendEvents env sess idLookup joinRoom events = do
       -- Format the room message
       let messageDoc = DocBody [authorDoc, eaAction, DocList . toList $ fmap unObject messages]
           mtBody = renderText messageDoc
+          mtType = Matrix.NoticeType
           mtFormat = Just "org.matrix.custom.html"
           mtFormattedBody = Just $ renderHtml messageDoc
           txnId = toText . showDigest . sha1 . toLazy . encodeUtf8 $ mtBody <> show ts
-          roomMessage = Matrix.RoomMessageNotice (Matrix.MessageText {..})
+          roomMessage = Matrix.RoomMessageText (Matrix.MessageText {..})
 
       -- Send the message
       roomIDM <- joinRoom room

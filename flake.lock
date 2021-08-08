@@ -34,11 +34,11 @@
     "matrix-client": {
       "flake": false,
       "locked": {
-        "lastModified": 1627838238,
-        "narHash": "sha256-vpT72mOppGO8HGqDpJ7P5hKxxUjQfJoKHMcag2WDa0A=",
+        "lastModified": 1628440790,
+        "narHash": "sha256-Pymz4vFCdvJ0Peia3QrTUne8rSw68AxU4NSCL7SdDpM=",
         "owner": "softwarefactory-project",
         "repo": "matrix-client-haskell",
-        "rev": "af8c03117a10e36ebbd5d5d596f58c08e39d4121",
+        "rev": "c4084462ca7bc5b0bbabaa58493f4aa61f5e04e1",
         "type": "github"
       },
       "original": {
