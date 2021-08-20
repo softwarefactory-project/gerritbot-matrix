@@ -42,13 +42,18 @@ spec server = describe "unit tests" $ do
             -- Out of order
             MatrixEvent action3 object2 room1 7,
             MatrixEvent action3 object1 room1 6,
-            MatrixEvent action1 object2 room1 1
+            MatrixEvent action1 object2 room1 1,
+            -- Different onBehalf
+            MatrixEvent action4 object2 room1 100,
+            MatrixEvent action5 object2 room1 101
           ]
      in groupEvents events
           `shouldBe` [ MatrixMessage room1 action1 (object1 :| [object2, object3]) 11 0,
                        MatrixMessage room2 action2 (object1 :| [object2]) 6 2,
                        MatrixMessage room1 action2 (object1 :| [object2]) 7 3,
-                       MatrixMessage room1 action3 (object1 :| [object2]) 7 6
+                       MatrixMessage room1 action3 (object1 :| [object2]) 7 6,
+                       MatrixMessage room1 action4 (object2 :| []) 100 100,
+                       MatrixMessage room1 action5 (object2 :| []) 101 101
                      ]
   it "format oneline" $ do
     renderText (formatMessages action1 [object1])
@@ -63,10 +68,14 @@ spec server = describe "unit tests" $ do
     renderHtml (formatMessages action1 [object1, object2])
       `shouldBe` "foo proposed:\n<ul><li>change1 <a href=\"localhost\">title</a></li><li>change2</li></ul>"
   where
-    (action1, action2, action3) =
-      ( EventAction "" Nothing "foo proposed:",
-        EventAction "" Nothing "foo merge:",
-        EventAction "" Nothing "bar do:"
+    behalf name = Just (MatrixAuthor name Nothing)
+    author = MatrixAuthor "" Nothing
+    (action1, action2, action3, action4, action5) =
+      ( EventAction author Nothing "foo proposed:",
+        EventAction author Nothing "foo merge:",
+        EventAction author Nothing "bar do:",
+        EventAction author (behalf "alice") "zuul merge:",
+        EventAction author (behalf "bob") "zuul merge:"
       )
     (object1, object2, object3) =
       ( EventObject $ DocBody ["change1 ", DocLink "localhost" "title"],

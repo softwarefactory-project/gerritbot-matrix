@@ -86,9 +86,15 @@ eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
   (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
   _ -> False
 
+data MatrixAuthor = MatrixAuthor
+  { maName :: Text,
+    maMail :: Maybe Text
+  }
+  deriving (Show, Eq, Generic, Hashable)
+
 data EventAction = EventAction
-  { eaAuthor :: Text,
-    eaAuthorMail :: Maybe Text,
+  { eaAuthor :: MatrixAuthor,
+    eaOnBehalf :: Maybe MatrixAuthor,
     eaAction :: Doc
   }
   deriving (Show, Eq, Generic, Hashable)
@@ -112,11 +118,15 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
     meTime = fromMaybe now (Gerrit.getCreatedOn event)
     meAction = EventAction {..}
     eaAction = DocText $ " " <> verb <> ":"
-    eaAuthorMail = Gerrit.userEmail user
-    eaAuthor =
+    eaOnBehalf
+      | Gerrit.userEmail changeOwner /= Gerrit.userEmail user = meAuthorM
+      | otherwise = Nothing
+    getAuthor user' =
       fromMaybe
         "Anonymous User"
-        (Gerrit.userName user <|> Gerrit.userUsername user <|> eaAuthorMail)
+        (Gerrit.userName user' <|> Gerrit.userUsername user' <|> Gerrit.userEmail user')
+    meAuthorM = Just (MatrixAuthor (getAuthor changeOwner) (Gerrit.userEmail changeOwner))
+    eaAuthor = MatrixAuthor (getAuthor user) (Gerrit.userEmail user)
     verb = case event of
       Gerrit.EventPatchsetCreated _ -> "proposed"
       Gerrit.EventChangeMerged _ -> "merged"
@@ -220,14 +230,15 @@ sendEvents env sess idLookup joinRoom events = do
     send :: MatrixMessage -> IO ()
     send (MatrixMessage room EventAction {..} messages ts _) = do
       -- Try to lookup matrix identity
-      authorDoc <- case eaAuthorMail of
-        Just mail -> do
-          userIdM <- idLookup mail
-          pure $ case userIdM of
-            Just userId -> DocLink ("https://matrix.to/#/" <> userId) eaAuthor
-            Nothing -> DocText eaAuthor
-        Nothing -> pure $ DocText eaAuthor
+      let lookupId MatrixAuthor {..} = case maMail of
+            Just mail -> do
+              userIdM <- idLookup mail
+              pure $ case userIdM of
+                Just userId -> DocLink ("https://matrix.to/#/" <> userId) maName
+                Nothing -> DocText maName
+            Nothing -> pure $ DocText maName
 
+      authorDoc <- lookupId eaAuthor
       -- Format the room message
       let messageDoc = DocBody [authorDoc, eaAction, DocList . toList $ fmap unObject messages]
           mtBody = renderText messageDoc
