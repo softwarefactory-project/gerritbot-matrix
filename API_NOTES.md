@@ -145,3 +145,8 @@ To summarize, in order to associate your gerrit account email to your matrix acc
 - Accept the identity terms (`/_matrix/identity/v2/terms`)
 - Validate email using two requests (`/_matrix/identity/v2/validate/email/`)
 - Bind the identity 3pid (`/_matrix/client/r0/account/3pid/bind`)
+
+If you want to verify your 3pid, you can do a lookup against the identity service. The email needs to be quoted:
+
+```ShellSession
+curl "${IDENTITY_URL}/_matrix/identity/api/v1/lookup?medium=email&address=user%40example.com"
