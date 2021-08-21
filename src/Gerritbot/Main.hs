@@ -117,7 +117,7 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
   where
     meTime = fromMaybe now (Gerrit.getCreatedOn event)
     meAction = EventAction {..}
-    eaAction = DocText $ " " <> verb <> " "
+    eaAction = DocText $ " " <> verb
     eaOnBehalf
       | Gerrit.userEmail changeOwner /= Gerrit.userEmail user = meAuthorM
       | otherwise = Nothing
@@ -242,7 +242,7 @@ sendEvents env sess idLookup joinRoom events = do
       onBehalfDoc <- case eaOnBehalf of
         Just onBehalf -> do
           behalfId <- lookupId onBehalf
-          pure [DocText "on behalf of ", behalfId]
+          pure [DocText " on behalf of ", behalfId]
         Nothing -> pure []
 
       -- Format the room message
