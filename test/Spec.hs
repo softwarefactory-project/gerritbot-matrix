@@ -4,7 +4,7 @@
 
 module Main where
 
-import qualified Gerrit.Event as Gerrit
+import qualified Gerrit.Data.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import Gerritbot.Main hiding (main)
 import Gerritbot.Utils

@@ -18,11 +18,11 @@
     "gerrit": {
       "flake": false,
       "locked": {
-        "lastModified": 1625003868,
-        "narHash": "sha256-7ndasmdlY0qHXwc0ec3QjJWt63Wb8WZyFZJbnFdPqas=",
+        "lastModified": 1633618410,
+        "narHash": "sha256-BmydOHmCwicLXs0PORKl9eHnkWfqW9pGETYrGLrNRYc=",
         "owner": "softwarefactory-project",
         "repo": "gerrit-haskell",
-        "rev": "1f13d97eb96956681fdedff2b2ee2ce93ed16746",
+        "rev": "e1801792624863bc96bf50a707b4d511538ad5ac",
         "type": "github"
       },
       "original": {

@@ -11,7 +11,7 @@ import Control.Monad.Catch (Handler (..))
 import qualified Control.Retry as Retry
 import qualified Data.Aeson as Aeson
 import Data.Time.Clock.System (SystemTime (..), getSystemTime)
-import Gerrit.Event (Event, EventType, eventName)
+import Gerrit.Data.Event (Event, EventType, eventName)
 import Gerritbot.Utils
 import Relude
 import qualified Turtle

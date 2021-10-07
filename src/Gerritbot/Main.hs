@@ -31,7 +31,7 @@ import Dhall hiding (maybe, void)
 import qualified Dhall.Core
 import qualified Dhall.Src
 import qualified Dhall.TH
-import qualified Gerrit.Event as Gerrit
+import qualified Gerrit.Data.Event as Gerrit
 import Gerritbot (GerritServer (..))
 import qualified Gerritbot
 import Gerritbot.Utils
