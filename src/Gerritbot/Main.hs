@@ -135,6 +135,7 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
     meObject = EventObject . DocBody $ changeInfo
     changeInfo =
       [ DocText $ "[" <> changeProject <> branch <> "] ",
+        DocText $ show changeNumber <> ": ",
         DocLink changeUrl changeSubject
       ]
     branch =
