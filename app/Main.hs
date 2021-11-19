@@ -2,6 +2,7 @@
 module Main where
 
 import qualified Gerritbot.Main
+import Main.Utf8 (withUtf8)
 
 main :: IO ()
-main = Gerritbot.Main.main
+main = withUtf8 Gerritbot.Main.main

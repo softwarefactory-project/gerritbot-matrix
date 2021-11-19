@@ -62,7 +62,7 @@ executable gerritbot-matrix
     import:           common-options
     main-is:          Main.hs
     hs-source-dirs:   app/
-    build-depends:    base, gerritbot-matrix
+    build-depends:    base, gerritbot-matrix, with-utf8
     ghc-options:      -threaded
                       -rtsopts
                       -with-rtsopts=-N
