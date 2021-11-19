@@ -49,17 +49,30 @@
 
         pkgs = import nixpkgs { inherit config overlays system; };
 
+        # Container user info
+        user = "bot";
+        home = "home/${user}";
+
+        # Create a passwd entry so that openssh can find the .ssh config
+        createPasswd = "echo ${user}:x:0:0:bot:/${home}:/bin/bash > etc/passwd";
+
+        # Ensure the home directory is r/w for any uid
+        rwHome = "mkdir -p -m 1777 ${home}";
+
+        # Provide fallback for unknown uid
+        mkLinks = "ln -s /${home}/.ssh .ssh";
+
       in rec {
         defaultPackage = packages.gerritbot-matrix;
         defaultApp = apps.gerritbot-matrix;
         defaultExe = pkgs.haskell.lib.justStaticExecutables defaultPackage;
         defaultContainerImage = pkgs.dockerTools.buildLayeredImage {
-          name = "gerritbot-matrix";
+          name = "quay.io/software-factory/gerritbot-matrix";
           contents = [ defaultExe pkgs.openssh pkgs.cacert ];
-          extraCommands = "echo root:x:0:0:root:/root:/bin/bash > etc/passwd";
+          extraCommands = "${createPasswd} && ${rwHome} && ${mkLinks}";
           config = {
             Entrypoint = [ "gerritbot-matrix" ];
-            Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" "HOME=/root" ];
+            Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" "HOME=/${home}" ];
           };
         };
 
