@@ -39,8 +39,14 @@
                 gerrit = hpPrev.callCabal2nix "gerrit" gerrit { };
                 matrix-client =
                   hpPrev.callCabal2nix "matrix-client" matrix-client { };
-                gerritbot-matrix =
-                  hpPrev.callCabal2nix "gerritbot-matrix" ./. { };
+                gerritbot-matrix = hpPrev.callCabal2nix "gerritbot-matrix"
+                  # Filter un-necessary file to avoid rebuild
+                  (pkgs.lib.sourceFilesBySuffices ./. [
+                    ".cabal"
+                    ".hs"
+                    ".dhall"
+                    "LICENSE"
+                  ]) { };
               };
             };
 
@@ -68,11 +74,17 @@
         defaultExe = pkgs.haskell.lib.justStaticExecutables defaultPackage;
         defaultContainerImage = pkgs.dockerTools.buildLayeredImage {
           name = "quay.io/software-factory/gerritbot-matrix";
-          contents = [ defaultExe pkgs.openssh pkgs.cacert ];
+          contents =
+            [ defaultExe pkgs.openssh pkgs.cacert pkgs.bash pkgs.coreutils ];
           extraCommands = "${createPasswd} && ${rwHome} && ${mkLinks}";
           config = {
             Entrypoint = [ "gerritbot-matrix" ];
-            Env = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt" "HOME=/${home}" ];
+            Env = [
+              "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+              "HOME=/${home}"
+              # Use fakeroot to avoid `No user exists for uid` error
+              "LD_PRELOAD=${pkgs.fakeroot}/lib/libfakeroot.so"
+            ];
           };
         };
 
