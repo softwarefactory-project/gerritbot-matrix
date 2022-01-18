@@ -80,11 +80,15 @@ deriving instance Eq EventType
 -- Convert initial gerrit event to a matrix event
 
 -- | Compare gerritbot event type config with original gerrit type
-eventEquals :: Gerrit.EventType -> EventType -> Bool
-eventEquals gerritEventType eventType = case (gerritEventType, eventType) of
+eventEquals :: Gerrit.EventType -> Gerrit.Change -> EventType -> Bool
+eventEquals gerritEventType change eventType = case (gerritEventType, eventType) of
   (Gerrit.PatchsetCreatedEvent, PatchsetCreated) -> True
   (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
+  (Gerrit.WorkInProgressStateChangedEvent, ChangeReady) | changeIsReady -> True
   _ -> False
+  where
+    -- When a change is ready, the wip field is empty, but this also check if it is set to false
+    changeIsReady = Gerrit.changeWip change `elem` [Just False, Nothing]
 
 data MatrixAuthor = MatrixAuthor
   { maName :: Text,
@@ -131,6 +135,7 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
       Gerrit.EventPatchsetCreated _ -> "proposed"
       Gerrit.EventChangeMerged _ -> "merged"
       Gerrit.EventChangeAbandoned _ -> "abandoned"
+      Gerrit.EventWorkInProgressStateChanged _ -> "marked as active"
       _ -> "n/a"
     meObject = EventObject . DocBody $ changeInfo
     changeInfo =
@@ -145,7 +150,7 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
 
 -- | Find if a channel match a change, return the room name
 getEventRoom :: GerritServer -> Gerrit.EventType -> Gerrit.Change -> Channel -> Maybe Text
-getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
+getEventRoom GerritServer {..} eventType change@Gerrit.Change {..} Channel {..}
   | serverMatch && projectMatch && branchMatch && eventMatch = Just room
   | otherwise = Nothing
   where
@@ -153,7 +158,7 @@ getEventRoom GerritServer {..} eventType Gerrit.Change {..} Channel {..}
     serverMatch = any (match host) servers
     projectMatch = any (match changeProject) projects
     branchMatch = any (match changeBranch) branches
-    eventMatch = any (eventEquals eventType) events
+    eventMatch = any (eventEquals eventType change) events
 
 -- | The gerritbot callback
 onEvent :: IO [Channel] -> TBMQueue MatrixEvent -> GerritServer -> Gerrit.Event -> IO ()
@@ -390,7 +395,8 @@ mainBot args env = do
         Gerrit.ChangeDeletedEvent,
         Gerrit.ChangeMergedEvent,
         Gerrit.ChangeRestoredEvent,
-        Gerrit.PatchsetCreatedEvent
+        Gerrit.PatchsetCreatedEvent,
+        Gerrit.WorkInProgressStateChangedEvent
       ]
 
     mkIdLookup idSess hd email = do

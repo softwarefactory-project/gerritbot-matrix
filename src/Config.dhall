@@ -1,5 +1,5 @@
 -- | The gerritbot channel configuration
-let Event = < PatchsetCreated | ChangeMerged >
+let Event = < PatchsetCreated | ChangeMerged | ChangeReady >
 
 in  { Type =
         { room : Text
@@ -11,7 +11,8 @@ in  { Type =
     , default =
       { branches = [ "main", "master" ]
       , servers = [ "*" ]
-      , events = [ Event.PatchsetCreated, Event.ChangeMerged ]
+      , events =
+        [ Event.PatchsetCreated, Event.ChangeMerged, Event.ChangeReady ]
       }
     , Event
     }
