@@ -84,11 +84,12 @@ eventEquals :: Gerrit.EventType -> Gerrit.Change -> EventType -> Bool
 eventEquals gerritEventType change eventType = case (gerritEventType, eventType) of
   (Gerrit.PatchsetCreatedEvent, PatchsetCreated) -> True
   (Gerrit.ChangeMergedEvent, ChangeMerged) -> True
-  (Gerrit.WorkInProgressStateChangedEvent, ChangeReady) | changeIsReady -> True
+  (Gerrit.WorkInProgressStateChangedEvent, ChangeReady) | changeIsReady change -> True
   _ -> False
-  where
-    -- When a change is ready, the wip field is empty, but this also check if it is set to false
-    changeIsReady = Gerrit.changeWip change `elem` [Just False, Nothing]
+
+-- When a change is ready, the wip field is empty, but this also check if it is set to false
+changeIsReady :: Gerrit.Change -> Bool
+changeIsReady change = Gerrit.changeWip change `elem` [Just False, Nothing]
 
 data MatrixAuthor = MatrixAuthor
   { maName :: Text,
@@ -132,7 +133,9 @@ toMatrixEvent (MkSystemTime now _) Gerrit.Change {..} user event meRoom = Matrix
     meAuthorM = Just (MatrixAuthor (getAuthor changeOwner) (Gerrit.userEmail changeOwner))
     eaAuthor = MatrixAuthor (getAuthor user) (Gerrit.userEmail user)
     verb = case event of
-      Gerrit.EventPatchsetCreated _ -> "proposed"
+      Gerrit.EventPatchsetCreated ps
+        | changeIsReady (Gerrit.patchsetCreatedChange ps) -> "proposed"
+        | otherwise -> "proposed wip"
       Gerrit.EventChangeMerged _ -> "merged"
       Gerrit.EventChangeAbandoned _ -> "abandoned"
       Gerrit.EventWorkInProgressStateChanged _ -> "marked as active"
