@@ -10,7 +10,6 @@
                   label: zuul-worker-haskell
             required-projects:
               - software-factory/gerrit-haskell
-              - software-factory/matrix-client-haskell
         - hlint:
             nodeset:
               nodes:
